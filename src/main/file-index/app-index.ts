@@ -78,7 +78,10 @@ const PS_TIMEOUT_MS = 8000;
  * `OutputEncoding` MUST be pinned to UTF-8: the child otherwise writes in the
  * system ANSI code page (GBK here) and non-ASCII app names come back garbled.
  */
-function runPowerShell(command: string, timeoutMs = PS_TIMEOUT_MS): Promise<string> {
+function runPowerShell(
+  command: string,
+  timeoutMs = PS_TIMEOUT_MS,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = [
       "-NoProfile",

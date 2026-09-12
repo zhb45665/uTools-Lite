@@ -244,12 +244,10 @@ export async function runSearch(query: string): Promise<SearchResponse> {
   // Real Windows shell icons (cached across searches; emoji fallback when
   // the icon service is unavailable or a path yields no icon). The whole
   // batch is capped so a slow/cold service can never stall the search UI.
-  // Real shell icons for files and classic .lnk apps. Store/builtin entries
-  // use `shell:AppsFolder\...` (no file path), so they are skipped here and
-  // keep the emoji fallback.
-  const iconTargets = [...response.files, ...response.apps].filter(
-    (it) => !String(it.payload).startsWith("shell:"),
-  );
+  // Real shell icons for files, classic .lnk apps AND Store/builtin apps:
+  // their `shell:AppsFolder\<AppID>` target is resolved by the icon service
+  // via SHParseDisplayName + SHGetFileInfo(SHGFI_PIDL).
+  const iconTargets = [...response.files, ...response.apps];
   if (iconTargets.length > 0) {
     const urls = await Promise.race([
       Promise.all(iconTargets.map((it) => getIconUrl(it.payload))),

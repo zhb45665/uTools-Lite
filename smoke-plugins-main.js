@@ -222,11 +222,10 @@ app.whenReady().then(async () => {
     const { scanApps } = require("./dist/main/file-index/app-index");
     const apps = await scanApps();
     const shellApps = apps.filter((a) => a.shell);
-    check(
-      "应用索引含商店/内置应用（UWP）",
-      shellApps.length >= 10,
-      { total: apps.length, shell: shellApps.length },
-    );
+    check("应用索引含商店/内置应用（UWP）", shellApps.length >= 10, {
+      total: apps.length,
+      shell: shellApps.length,
+    });
     check(
       "商店应用启动目标为 shell:AppsFolder\\<AppID>",
       shellApps.length > 0 &&
@@ -246,6 +245,36 @@ app.whenReady().then(async () => {
         apps.some((a) => a.source === "store"),
       { total: apps.length, lnk: apps.filter((a) => !a.shell).length },
     );
+
+    // --- UWP 图标：shell:AppsFolder -> SHParseDisplayName -> 真实图标
+    const { getIconUrl, warmupIcons, killIcons } = require("./dist/main/file-index/icon-service");
+    warmupIcons();
+    const calcIcon = await getIconUrl(
+      "shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
+    );
+    const photosIcon = await getIconUrl(
+      "shell:AppsFolder\\Microsoft.Windows.Photos_8wekyb3d8bbwe!App",
+    );
+    check(
+      "商店/内置应用能提真实图标（不再是占位）",
+      typeof calcIcon === "string" &&
+        calcIcon.startsWith("data:image/png;base64,") &&
+        typeof photosIcon === "string" &&
+        calcIcon !== photosIcon,
+      {
+        calc: calcIcon ? calcIcon.length : null,
+        photos: photosIcon ? photosIcon.length : null,
+      },
+    );
+    check(
+      "不存在的 AppID 图标返回 null（不抛错）",
+      (await getIconUrl("shell:AppsFolder\\NotAReal_9!App")) === null,
+    );
+    check(
+      "经典 exe 图标未回归",
+      typeof (await getIconUrl("C:\\Windows\\System32\\notepad.exe")) === "string",
+    );
+    killIcons();
 
     // --- pure path validation (no traversal)
     let traversalBlocked = false;
