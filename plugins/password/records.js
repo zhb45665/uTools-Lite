@@ -27,8 +27,17 @@
       if (!e.host) throw new Error("请填写主机 IP 或域名");
       if (/[\s/@\\?#]/.test(e.host) || e.host.startsWith("-") || e.host.includes("://"))
         throw new Error("主机只填写 IP 或域名，端口请单独填写");
-      if (e.host.includes(":") && !/^[\[\]a-fA-F0-9:.%a-zA-Z_-]+$/.test(e.host))
-        throw new Error("主机地址格式不正确");
+      try {
+        if (e.host.includes(":")) {
+          const host = e.host.startsWith("[") ? e.host : `[${e.host}]`;
+          const parsed = new URL(`http://${host}`);
+          if (!parsed.hostname.startsWith("[") || parsed.port) throw new Error();
+        } else {
+          if (!/^[\p{L}\p{N}._-]+$/u.test(e.host)) throw new Error();
+          new URL(`http://${e.host}`);
+        }
+      } catch { throw new Error("主机地址格式不正确；端口请单独填写，IPv6 可直接填写完整地址"); }
+      if (/[\x00-\x1f\x7f]/.test(e.username + e.keyPath)) throw new Error("账号和密钥路径不能包含换行或控制字符");
       if (!/^\d+$/.test(e.port) || Number(e.port) < 1 || Number(e.port) > 65535)
         throw new Error("端口应为 1–65535 的整数");
       if (e.auth === "key" && (e.protocol !== "ssh" || !e.keyPath))

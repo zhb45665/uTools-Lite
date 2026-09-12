@@ -36,9 +36,11 @@ function onLocked(reason) {
   $("list").replaceChildren(); $("detail").replaceChildren(); $("group-options").replaceChildren();
   $("filter").value = ""; $("group-filter").replaceChildren(new Option("全部分组", ""));
   $("master").value = ""; $("master2").value = ""; $("genpw").textContent = "";
-  $("editor").hidden = true; $("restore-dialog").close(); $("restore-form").reset(); restoreText = "";
+  $("editor").hidden = true; $("detail").hidden = false;
+  $("restore-dialog").close(); $("restore-form").reset(); restoreText = "";
   if (confirmDone) { confirmDone(false); confirmDone = null; } $("confirm-dialog").close();
   creating = false; $("confirm-master").hidden = true; $("unlockbtn").disabled = false;
+  $("master").minLength = 0;
   $("unlockbtn").textContent = "解锁"; $("locktitle").textContent = "已锁定，请输入主密码";
   tab = "vault"; syncView(); status(reason === "idle" ? "闲置超时，已清除页面中的凭据内容" : "已锁定");
   $("master").focus();

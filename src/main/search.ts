@@ -1,6 +1,6 @@
 import { filter } from "fuzzaldrin-plus";
 import { SearchItem, SearchResponse } from "../shared/ipc";
-import { searchEverything } from "./file-index/everything-cli";
+import { searchEverything, findEverythingExe } from "./file-index/everything-cli";
 import { scanApps } from "./file-index/app-index";
 import { searchLocalIndex, getIndexStatus } from "./file-index/local-index";
 import { getIconUrl } from "./file-index/icon-service";
@@ -197,6 +197,18 @@ export async function runSearch(query: string): Promise<SearchResponse> {
         },
       });
     }
+  }
+
+  // Everything 联动：本地安装了 Everything 时，提供回车直达全盘检索入口
+  if (findEverythingExe()) {
+    response.commands.push({
+      id: `cmd:everything:${q}`,
+      type: "command",
+      title: `在 Everything 中搜索「${q}」`,
+      subtitle: "回车调起本地 Everything 极速呈现全盘结果",
+      icon: "🔍",
+      payload: `everything:${q}`,
+    });
   }
 
   // File search via Everything (instant when available), plugin keyword

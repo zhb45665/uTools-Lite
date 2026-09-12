@@ -74,6 +74,17 @@ const SKIP_SUBSTRINGS = [
   "programdata\\package cache",
   "microsoft\\windows\\wer",
   "\\appdata\\local\\pip",
+  "\\target",
+  "\\dist",
+  "\\build",
+  "\\.gradle",
+  "\\.cargo",
+  "\\.nuget",
+  "\\venv",
+  "\\.venv",
+  "\\__pycache__",
+  "\\.idea",
+  "\\.vscode",
 ];
 
 function shouldSkipDir(lowerDir: string): boolean {
@@ -87,13 +98,13 @@ function shouldSkipDir(lowerDir: string): boolean {
 
 function listDriveRoots(): string[] {
   // fs.accessSync on a drive root returns immediately for present local
-  // drives and throws fast for absent letters; only a stuck network share
-  // would be slow, and we probe a fixed, small letter set.
+  // drives and throws fast for absent letters. Probe C: through Z: (skip A/B floppy).
   const roots: string[] = [];
-  for (const l of ["C", "D", "E", "F", "G", "H"]) {
+  for (let i = 67; i <= 90; i++) { // C-Z
+    const letter = String.fromCharCode(i);
     try {
-      fs.accessSync(l + ":\\", fs.constants.F_OK);
-      roots.push(l + ":\\");
+      fs.accessSync(letter + ":\\", fs.constants.F_OK);
+      roots.push(letter + ":\\");
     } catch {
       /* absent drive */
     }
@@ -180,6 +191,7 @@ async function walkDir(
     } else if (e.isFile()) {
       addEntry(full, e.name.toLowerCase(), dir);
       if (state.orig.length >= MAX_ENTRIES) {
+        state.capped = true;
         stop.flag = true;
         return;
       }

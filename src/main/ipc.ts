@@ -13,7 +13,7 @@ import {
   toggleLauncher,
 } from "./launcher-window";
 import { runSearch } from "./search";
-import { detectEverything } from "./file-index/everything-cli";
+import { detectEverything, openLocalEverything } from "./file-index/everything-cli";
 import { getAppCount } from "./file-index/app-index";
 import { getIndexStatus } from "./file-index/local-index";
 import { shell } from "electron";
@@ -56,10 +56,21 @@ export function registerIpc(
       const payload = item?.payload;
       if (!payload) return { ok: false };
       try {
+        if (payload.startsWith("everything:")) {
+          const q = payload.slice("everything:".length);
+          openLocalEverything(q);
+          hideLauncher();
+          return { ok: true };
+        }
         if (item.type === "command") {
           // Calculator result -> copy to clipboard.
           clipboard.writeText(payload);
           return { ok: true, copied: payload };
+        }
+        if (payload.startsWith("http://") || payload.startsWith("https://")) {
+          void shell.openExternal(payload);
+          hideLauncher();
+          return { ok: true };
         }
         // Store / built-in (UWP) apps: no real path exists, so neither
         // existsSync nor shell.openPath applies — the id is resolved by the
@@ -183,8 +194,10 @@ export function registerIpc(
     return pm.handleSelect(item ?? ({} as SearchItem));
   });
 
-  ipcMain.handle(Ipc.PluginDetailReady, (e) => {
-    pm.markDetailReady(frameIdOf(e));
+  ipcMain.handle(Ipc.PluginDetailReady, () => {
+    // The launcher top frame reports iframe onLoad; it is not the recipient.
+    // detailSend records the actual plugin frame when it sends its first request.
+    pm.markDetailReady();
     return { ok: true };
   });
 

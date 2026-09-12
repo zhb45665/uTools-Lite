@@ -19,6 +19,7 @@ import {
 import { ApiServer, GateContext } from "./api-server";
 import { PluginSandbox } from "./sandbox";
 import { authorizeDir, initPermissions } from "./permissions";
+import { setCredentialWindow } from "../launcher-window";
 
 /**
  * rm -rf with retries: a freshly killed sandbox may still hold its cwd
@@ -287,6 +288,7 @@ export class PluginManager {
     };
 
     if (m.detail) {
+      setCredentialWindow(m.id === "password");
       this.activeDetail = {
         pluginId: m.id,
         keyword,
@@ -361,15 +363,27 @@ export class PluginManager {
     const d = this.activeDetail;
     if (!d) return;
     if (frameId) d.frameId = frameId; // remember where to send the reply
-    this.sandboxes.get(d.pluginId)?.post("mainMessage", { data });
+    const m = this.manifests.get(d.pluginId);
+    if (!m) return;
+    // A newly mounted detail page can send its first request before handshake.
+    void this.ensureLoaded(m).then(sb => {
+      if (this.activeDetail === d) sb.post("mainMessage", { data });
+    }).catch(e => {
+      if (this.activeDetail !== d) return;
+      const request = data as { requestId?: number } | null;
+      this.forwardDetailMessage(d.pluginId, { type: "res", requestId: request?.requestId,
+        error: `插件启动失败：${String((e as Error).message || e)}` });
+    });
   }
 
   /** Close the detail view (Esc / blur). Fires plugin onExit, reaps later. */
   closeDetail(fireExit: boolean): void {
+    setCredentialWindow(false);
     const d = this.activeDetail;
     this.activeDetail = null;
     this.detailQueue = []; // never leak a previous page's messages into the next
     if (!d) return;
+    this.getWin()?.webContents.send(Ipc.EvtDetailExit);
     const sb = this.sandboxes.get(d.pluginId);
     if (sb && fireExit) {
       // onExit is a one-way signal; the sandbox stays warm for reuse.

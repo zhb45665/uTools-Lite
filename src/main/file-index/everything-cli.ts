@@ -1,14 +1,86 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 let detected: boolean | null = null;
+let cachedExePath: string | null = null;
+
+const COMMON_EVERYTHING_PATHS = [
+  "D:\\Program Files\\Everything\\Everything.exe",
+  "C:\\Program Files\\Everything\\Everything.exe",
+  "C:\\Program Files (x86)\\Everything\\Everything.exe",
+  "D:\\Program Files (x86)\\Everything\\Everything.exe",
+  "E:\\Program Files\\Everything\\Everything.exe",
+  "E:\\Program Files (x86)\\Everything\\Everything.exe",
+];
 
 /**
- * Detect whether the Everything `es` CLI is on PATH.
+ * Locate local Everything.exe installation on disk.
+ */
+export function findEverythingExe(): string | null {
+  if (cachedExePath && fs.existsSync(cachedExePath)) return cachedExePath;
+
+  for (const p of COMMON_EVERYTHING_PATHS) {
+    if (fs.existsSync(p)) {
+      cachedExePath = p;
+      return p;
+    }
+  }
+
+  const prog = process.env["ProgramFiles"];
+  if (prog) {
+    const p = path.join(prog, "Everything", "Everything.exe");
+    if (fs.existsSync(p)) {
+      cachedExePath = p;
+      return p;
+    }
+  }
+  const prog86 = process.env["ProgramFiles(x86)"];
+  if (prog86) {
+    const p = path.join(prog86, "Everything", "Everything.exe");
+    if (fs.existsSync(p)) {
+      cachedExePath = p;
+      return p;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Open local Everything GUI window, optionally focusing a search query.
+ */
+export function openLocalEverything(query?: string): boolean {
+  const exe = findEverythingExe();
+  if (!exe) return false;
+  try {
+    const args = query && query.trim() ? ["-search", query.trim()] : [];
+    const child = spawn(exe, args, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false,
+    });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Detect whether Everything is available (either `es` CLI or local Everything.exe installation).
  * Caches the result after the first probe.
  */
 export function detectEverything(): Promise<boolean> {
   return new Promise((resolve) => {
     if (detected !== null) return resolve(detected);
+
+    // If local Everything.exe exists, Everything is definitely installed!
+    if (findEverythingExe() !== null) {
+      detected = true;
+      return resolve(true);
+    }
+
     const proc = spawn("es", ["--version"], { windowsHide: true });
     let got = false;
     const done = (ok: boolean) => {
@@ -31,7 +103,7 @@ export function detectEverything(): Promise<boolean> {
         proc.kill();
         done(false);
       }
-    }, 3000);
+    }, 2000);
   });
 }
 
@@ -51,7 +123,9 @@ export function searchEverything(
   return detectEverything().then((available) => {
     if (!available) return { available: false, paths: [] };
     return new Promise<EverythingResult>((resolve) => {
-      const proc = spawn("es", [query, "-a"], { windowsHide: true });
+      const proc = spawn("es", [query, "-n", String(limit)], {
+        windowsHide: true,
+      });
       let buf = "";
       let lines = 0;
       let settled = false;

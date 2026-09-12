@@ -139,13 +139,16 @@ export function getIconUrl(p: string): Promise<string | null> {
       resolve(url);
     };
     const list = waiters.get(p);
-    if (list) list.push(finish);
-    else waiters.set(p, [finish]);
-    queue.push(p);
-    try {
-      child?.stdin?.write(p + "\n");
-    } catch {
-      finish(null);
+    if (list) {
+      list.push(finish);
+    } else {
+      waiters.set(p, [finish]);
+      queue.push(p);
+      try {
+        child?.stdin?.write(p + "\n");
+      } catch {
+        finish(null);
+      }
     }
     setTimeout(() => {
       // Global health watchdog: if the service has not produced a single

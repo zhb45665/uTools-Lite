@@ -187,28 +187,39 @@ export default function App() {
     [],
   );
 
+  const loadingTimerRef = useRef<number | null>(null);
+
   const doSearch = useCallback(
     (q: string) => {
       const version = ++searchVersion.current;
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
-      setFlat([]);
-      setSelected(0);
+      if (loadingTimerRef.current) window.clearTimeout(loadingTimerRef.current);
+
       if (!q.trim()) {
         setFlat([]);
+        setSelected(0);
         setLoading(false);
         return;
       }
-      setLoading(true);
+
+      // Delay loading spinner by 150ms so fast queries (<150ms) do not flicker
+      loadingTimerRef.current = window.setTimeout(() => {
+        if (version === searchVersion.current) setLoading(true);
+      }, 150);
+
       debounceRef.current = window.setTimeout(async () => {
         try {
           const res = await window.launcher.search(q);
           if (version !== searchVersion.current) return;
-          setFlat(buildFlat(res));
-          setSelected(0);
+          if (loadingTimerRef.current) window.clearTimeout(loadingTimerRef.current);
+          const newFlat = buildFlat(res);
+          setFlat(newFlat);
+          setSelected((prev) => (prev < newFlat.length ? prev : 0));
         } catch {
           if (version === searchVersion.current)
             showToast("搜索失败，请重新输入后重试");
         } finally {
+          if (loadingTimerRef.current) window.clearTimeout(loadingTimerRef.current);
           if (version === searchVersion.current) setLoading(false);
         }
       }, 120);
@@ -223,7 +234,7 @@ export default function App() {
     else {
       searchVersion.current++;
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
-      setFlat([]);
+      if (loadingTimerRef.current) window.clearTimeout(loadingTimerRef.current);
       setLoading(false);
     }
   };
@@ -453,7 +464,7 @@ export default function App() {
             composing.current = true;
             searchVersion.current++;
             if (debounceRef.current) window.clearTimeout(debounceRef.current);
-            setFlat([]);
+            if (loadingTimerRef.current) window.clearTimeout(loadingTimerRef.current);
             setLoading(false);
           }}
           onCompositionEnd={(e) => {
@@ -701,17 +712,33 @@ export default function App() {
         </span>
         <span
           className="index-status"
+          style={{ cursor: "pointer" }}
+          onClick={() => {
+            if (info?.everythingAvailable) {
+              void window.launcher.launch({
+                type: "command",
+                payload: query ? `everything:${query}` : "everything:",
+              });
+            } else if (fileIndex?.capped) {
+              void window.launcher.launch({
+                type: "app",
+                payload: "https://www.voidtools.com/zh-cn/",
+              });
+            }
+          }}
           title={
             info?.everythingAvailable
-              ? "使用 Everything 搜索文件"
-              : "本地文件索引"
+              ? "已连接本地 Everything，点击直接唤起"
+              : fileIndex?.capped
+                ? "本地索引已达 600,000 条上限，点击查看 Everything 获取全盘秒搜"
+                : "本地文件索引"
           }
         >
           <i className={fileIndex?.running ? "indexing" : ""} />
           {info?.everythingAvailable
-            ? "搜索已就绪"
+            ? "Everything 已联动 (点击唤起)"
             : fileIndex
-              ? `${fileIndex.running ? "索引中 · " : fileIndex.capped ? "已达上限 · " : "已索引 "}${fileIndex.count.toLocaleString()} 个文件`
+              ? `${fileIndex.running ? "索引中 · " : fileIndex.capped ? "已达上限(点此极速全搜) · " : "已索引 "}${fileIndex.count.toLocaleString()} 个文件`
               : "准备中"}
         </span>
       </footer>

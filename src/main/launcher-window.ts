@@ -6,6 +6,23 @@ let win: BrowserWindow | null = null;
 let store: SettingsStore;
 let isPreload = true;
 let blurSuspended = 0; // ref-counted: native dialogs would otherwise blur-hide the window
+let credentialOriginalSize: [number, number] | null = null;
+
+/** Expand the credential workspace and restore the compact launcher on exit. */
+export function setCredentialWindow(expanded: boolean): void {
+  if (!win || win.isDestroyed()) return;
+  if (expanded && !credentialOriginalSize) credentialOriginalSize = win.getContentSize() as [number, number];
+  if (!expanded && !credentialOriginalSize) return;
+  const area = screen.getDisplayMatching(win.getBounds()).workArea;
+  const desired = expanded ? [1000, 700] : credentialOriginalSize!;
+  // Store/restore content dimensions; outer dimensions include rounded Windows borders.
+  const width = Math.min(desired[0], area.width - 2), height = Math.min(desired[1], area.height - 2);
+  win.setContentSize(width, height);
+  const bounds = win.getBounds();
+  win.setPosition(Math.max(area.x, Math.min(bounds.x, area.x + area.width - bounds.width)),
+    Math.max(area.y, Math.min(bounds.y, area.y + area.height - bounds.height)));
+  if (!expanded) credentialOriginalSize = null;
+}
 
 function devRendererUrl(): string | undefined {
   // In dev we could point at the Vite dev server, but for P1 we always load
@@ -35,6 +52,7 @@ export function createLauncherWindow(settings: SettingsStore): void {
   win = new BrowserWindow({
     width,
     height,
+    useContentSize: true,
     show: false,
     frame: false,
     transparent: true,
@@ -76,10 +94,10 @@ export function createLauncherWindow(settings: SettingsStore): void {
     if (blurSuspended > 0) return; // dialog open: stay visible
     // Hide when focus is lost, like Spotlight / uTools.
     if (win && !win.isDestroyed()) {
+      onWindowBlur?.(); // restore the compact size before persisting it
       // Save size before hiding.
-      const [w, h] = win.getSize();
+      const [w, h] = win.getContentSize();
       store.set("rememberSize", { width: w, height: h });
-      onWindowBlur?.(); // e.g. close an open plugin detail view (fires onExit)
       win.hide();
     }
   });
@@ -102,6 +120,7 @@ function positionOnCursorDisplay(w: BrowserWindow): void {
 
 export function showLauncher(): void {
   if (!win || win.isDestroyed()) return;
+  setCredentialWindow(false);
   positionOnCursorDisplay(win);
   win.show();
   win.focus();
