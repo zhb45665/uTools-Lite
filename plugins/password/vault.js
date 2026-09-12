@@ -48,11 +48,13 @@ function encryptVault(master, obj) {
  */
 function decryptVault(master, blob) {
  if (!blob || typeof blob !== "object") throw new Error("保险库文件损坏");
+ if (blob.version !== VERSION || !blob.kdf || blob.kdf.N !== KDF.N || blob.kdf.r !== KDF.r || blob.kdf.p !== KDF.p || blob.kdf.keylen !== KDF.keylen)
+  throw new Error("不支持的保险库版本或加密参数");
  const salt = Buffer.from(String(blob.kdf && blob.kdf.salt), "base64");
  const iv = Buffer.from(String(blob.iv), "base64");
  const tag = Buffer.from(String(blob.tag), "base64");
  const data = Buffer.from(String(blob.data), "base64");
- if (!salt.length || !iv.length || !tag.length)
+ if (salt.length !== SALT_BYTES || iv.length !== IV_BYTES || tag.length !== 16)
   throw new Error("保险库文件损坏");
  const key = deriveKey(master, salt, blob.kdf);
  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);

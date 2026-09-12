@@ -165,6 +165,19 @@ const main = {
       10000,
     );
   },
+  writeFileAtomic(p, content, exclusive = false) {
+    return rpc.call(
+      "fs.writeAtomic",
+      { path: String(p), content: String(content), exclusive },
+      10000,
+    );
+  },
+  saveEncryptedBackup(encrypted) {
+    return rpc.call("password.backupSave", { encrypted }, 120000);
+  },
+  pickEncryptedBackup() {
+    return rpc.call("password.backupPick", {}, 120000);
+  },
   listDir(p) {
     return rpc
       .call("fs.list", { path: String(p) }, 10000)

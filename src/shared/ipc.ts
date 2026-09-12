@@ -1,6 +1,7 @@
 // Shared IPC channel names + payload types. Imported by main, preload, and renderer.
 
 export const Ipc = {
+ LauncherHide: "launcher:hide",
  /** Run a search query. */
  SearchQuery: "search:query",
  /** Open/launch a file or app. */

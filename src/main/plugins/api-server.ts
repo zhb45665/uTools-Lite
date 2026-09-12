@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { clipboard, shell } from "electron";
+import { clipboard, shell, dialog } from "electron";
+import { suspendBlurHide, resumeBlurHide } from "../launcher-window";
 import { Manifest, pluginDataDir } from "./manifest";
+import { writeAtomic } from "./atomic-file";
 import {
   assertInside,
   checkFsAccess,
@@ -52,6 +54,72 @@ export class ApiServer {
     this.handlers.set("fs.list", async (m, p) => {
       const target = await this.guardFs(m, p?.path, "列出");
       return { entries: await this.listEntries(target) };
+    });
+    this.handlers.set("fs.writeAtomic", async (m, p) => {
+      const target = await this.guardFs(m, p?.path, "写入");
+      await writeAtomic(
+        target,
+        String(p?.content ?? ""),
+        p?.exclusive === true,
+      );
+      return { ok: true };
+    });
+    this.handlers.set("password.backupSave", async (m, p) => {
+      if (m.id !== "password" || !m.permissions.includes("fs"))
+        throw new Error("backup capability unavailable");
+      const content = String(p?.encrypted ?? "");
+      const blob = JSON.parse(content);
+      if (
+        !blob?.kdf ||
+        !blob?.iv ||
+        !blob?.tag ||
+        typeof blob?.data !== "string"
+      )
+        throw new Error("invalid encrypted backup");
+      suspendBlurHide();
+      try {
+        const result = await dialog.showSaveDialog({
+          title: "保存加密备份",
+          defaultPath: `utools-vault-${new Date().toISOString().slice(0, 10)}.json`,
+          filters: [{ name: "加密密码本", extensions: ["json"] }],
+        });
+        if (result.canceled || !result.filePath) return { canceled: true };
+        if (
+          path
+            .resolve(result.filePath)
+            .toLowerCase()
+            .startsWith(
+              path.resolve(pluginDataDir(m.id)).toLowerCase() + path.sep,
+            )
+        )
+          throw new Error("请选择密码本数据目录之外的位置保存备份");
+        await writeAtomic(result.filePath, content);
+        return { saved: true };
+      } finally {
+        resumeBlurHide();
+      }
+    });
+    this.handlers.set("password.backupPick", async (m) => {
+      if (m.id !== "password" || !m.permissions.includes("fs"))
+        throw new Error("backup capability unavailable");
+      suspendBlurHide();
+      try {
+        const result = await dialog.showOpenDialog({
+          title: "选择加密备份",
+          properties: ["openFile"],
+          filters: [{ name: "加密密码本", extensions: ["json"] }],
+        });
+        if (result.canceled || !result.filePaths[0]) return { canceled: true };
+        const file = result.filePaths[0];
+        if ((await fs.promises.stat(file)).size > 10 * 1024 * 1024)
+          throw new Error("备份文件过大");
+        return {
+          encrypted: await fs.promises.readFile(file, "utf8"),
+          name: path.basename(file),
+        };
+      } finally {
+        resumeBlurHide();
+      }
     });
     this.handlers.set("clipboard.read", (m) => this.clipboardRead(m));
     this.handlers.set("clipboard.write", (m, p) => this.clipboardWrite(m, p));

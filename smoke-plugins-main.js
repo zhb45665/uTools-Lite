@@ -247,7 +247,11 @@ app.whenReady().then(async () => {
     );
 
     // --- UWP 图标：shell:AppsFolder -> SHParseDisplayName -> 真实图标
-    const { getIconUrl, warmupIcons, killIcons } = require("./dist/main/file-index/icon-service");
+    const {
+      getIconUrl,
+      warmupIcons,
+      killIcons,
+    } = require("./dist/main/file-index/icon-service");
     warmupIcons();
     const calcIcon = await getIconUrl(
       "shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App",
@@ -272,7 +276,8 @@ app.whenReady().then(async () => {
     );
     check(
       "经典 exe 图标未回归",
-      typeof (await getIconUrl("C:\\Windows\\System32\\notepad.exe")) === "string",
+      typeof (await getIconUrl("C:\\Windows\\System32\\notepad.exe")) ===
+        "string",
     );
     killIcons();
 
@@ -380,9 +385,8 @@ app.whenReady().then(async () => {
     );
     const genItems = await pm.searchPlugins("生成密码 16");
     check(
-      "inputSearch: '生成密码 16' -> 恰 16 位随机密码",
-      genItems.length === 1 &&
-        String(genItems[0].title).replace(/^🔑 /, "").length === 16,
+      "inputSearch: '生成密码 16' -> 带长度提示的生成项",
+      genItems.length === 1 && /生成 16 位随机密码/.test(genItems[0].title),
       genItems.map((i) => i.title),
     );
     const lockedSearch = await pm.searchPlugins("密码 github");

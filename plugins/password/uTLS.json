@@ -2,10 +2,10 @@
   "id": "password",
   "name": "密码本",
   "description": "密码管理 + 随机密码生成：AES-256-GCM 本地加密、主密码解锁、复制 30 秒后自动清空剪贴板",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "main": "main.js",
   "detail": "detail.html",
-  "keywords": ["密码", "密码本", "密码管理", "password", "pwd", "生成密码"],
+  "keywords": ["密码", "密码本", "密码管理", "password", "pwd", "生成密码", "服务器"],
   "icon": "🔐",
   "permissions": ["fs", "clipboard"]
 }
