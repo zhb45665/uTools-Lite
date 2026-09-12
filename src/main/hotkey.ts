@@ -11,10 +11,11 @@ export function registerHotkey(
   accelerator: string,
   onToggle: () => void,
 ): boolean {
-  unregisterHotkey();
+  if (accelerator === current) return true;
   try {
     const ok = globalShortcut.register(accelerator, onToggle);
     if (ok) {
+      if (current) globalShortcut.unregister(current);
       current = accelerator;
       return true;
     }

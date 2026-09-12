@@ -10,6 +10,7 @@ import {
   hideLauncher,
   suspendBlurHide,
   resumeBlurHide,
+  toggleLauncher,
 } from "./launcher-window";
 import { runSearch } from "./search";
 import { detectEverything } from "./file-index/everything-cli";
@@ -41,6 +42,10 @@ export function registerIpc(
   pm: PluginManager,
   onHotkeyChanged: () => void,
 ): void {
+  ipcMain.handle(Ipc.LauncherHide, () => {
+    pm.closeDetail(true);
+    hideLauncher();
+  });
   ipcMain.handle(Ipc.SearchQuery, async (_e, query: string) => {
     return runSearch(query ?? "");
   });
@@ -116,7 +121,7 @@ export function registerIpc(
   });
 
   ipcMain.handle(Ipc.HotkeySet, (_e, accelerator: string) => {
-    const ok = registerHotkey(accelerator, () => showLauncher());
+    const ok = registerHotkey(accelerator, toggleLauncher);
     if (ok) {
       store.set("hotkey", accelerator);
       onHotkeyChanged();

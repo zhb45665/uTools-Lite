@@ -34,6 +34,9 @@ export interface DetailMessagePayload {
 
 // ------------------------------------------------- launcher frame (main)
 const launcherApi = {
+  hide(): Promise<void> {
+    return ipcRenderer.invoke(Ipc.LauncherHide);
+  },
   search(query: string): Promise<SearchResponse> {
     return ipcRenderer.invoke(
       Ipc.SearchQuery,

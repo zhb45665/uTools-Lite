@@ -171,7 +171,7 @@ export async function runSearch(query: string): Promise<SearchResponse> {
       id: "cmd:calc",
       type: "command",
       title: `${calc.expression} = ${calc.result}`,
-      subtitle: "Press Enter to copy the result",
+      subtitle: "回车复制计算结果",
       icon: "🧮",
       payload: calc.result,
     });
