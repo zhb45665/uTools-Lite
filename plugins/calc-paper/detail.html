@@ -16,7 +16,7 @@
       --accent: #2f5fd0;
       --danger-soft: rgba(200, 60, 50, 0.12);
       --danger-text: #c03c32;
-      --row-hover: rgba(0, 0, 0, 0.04);
+      --line-active: rgba(47, 95, 208, 0.07);
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -27,10 +27,10 @@
         --divider: rgba(255, 255, 255, 0.08);
         --input-text: #f2f2f4;
         --btn-soft: rgba(255, 255, 255, 0.1);
-        --accent: #3f6ad8;
+        --accent: #6d93e8;
         --danger-soft: rgba(230, 90, 80, 0.18);
         --danger-text: #e2726a;
-        --row-hover: rgba(255, 255, 255, 0.05);
+        --line-active: rgba(109, 147, 232, 0.1);
       }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -48,72 +48,73 @@
       gap: 10px;
       padding: 10px 14px;
       border-bottom: 1px solid var(--divider);
+      flex-shrink: 0;
     }
     .bar .title { font-weight: 600; }
     .bar .status { flex: 1; font-size: 12px; color: var(--dim); }
     button {
-      background: var(--accent);
+      background: var(--btn-soft);
       border: none;
-      color: #fff;
+      color: var(--text);
       border-radius: 7px;
       padding: 6px 14px;
       font-size: 13px;
       cursor: pointer;
     }
-    button.secondary { background: var(--btn-soft); color: var(--text); }
     button.danger { background: var(--danger-soft); color: var(--danger-text); }
-    button:disabled { opacity: 0.5; cursor: default; }
-    .inputrow {
-      display: flex;
-      gap: 8px;
-      padding: 10px 14px;
-      border-bottom: 1px solid var(--divider);
-    }
-    #expr {
-      flex: 1;
-      border: 1px solid var(--divider);
-      border-radius: 8px;
-      outline: none;
-      background: transparent;
-      color: var(--input-text);
-      padding: 8px 12px;
-      font: 15px Consolas, "Courier New", monospace;
-    }
-    #expr:focus { border-color: var(--accent); }
-    #eq { padding: 6px 18px; font-size: 15px; }
+
+    /* ---- the paper itself: no boxes, no equals button ---- */
     #paper {
       flex: 1;
       overflow-y: auto;
-      padding: 6px 8px;
+      padding: 14px 18px 40px;
+      cursor: text;
     }
-    .row {
-      display: flex;
-      align-items: baseline;
-      gap: 10px;
-      padding: 6px 8px;
-      border-radius: 7px;
-      font: 14px Consolas, "Courier New", monospace;
+    .line {
+      position: relative;
+      padding: 2px 8px 4px 16px;
+      border-radius: 6px;
     }
-    .row:hover { background: var(--row-hover); }
-    .row .e { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .row .r { font-weight: 600; color: var(--accent); }
-    .row .r.bad { color: var(--danger-text); font-weight: 400; }
-    .row .t { font-size: 11px; color: var(--faint); font-family: "Segoe UI", system-ui, sans-serif; }
-    .empty {
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--faint);
-      font-size: 13px;
+    .line.active { background: var(--line-active); }
+    .line.active::before {
+      content: "";
+      position: absolute;
+      left: 5px;
+      top: 7px;
+      bottom: 8px;
+      width: 2px;
+      border-radius: 1px;
+      background: var(--accent);
     }
+    .expr {
+      display: block;
+      width: 100%;
+      border: none;
+      outline: none;
+      background: transparent;
+      color: var(--input-text);
+      font: 16px/1.5 Consolas, "Courier New", monospace;
+      letter-spacing: 0.2px;
+      padding: 0;
+    }
+    .expr::placeholder { color: var(--faint); font-size: 14px; }
+    .res {
+      font: 13px/1.45 Consolas, "Courier New", monospace;
+      color: var(--accent);
+      padding: 1px 0 0 26px;
+    }
+    .res.bad { color: var(--danger-text); opacity: 0.65; font-size: 12px; }
+    .res:empty { display: none; }
+
     .foot {
       display: flex;
       gap: 12px;
+      align-items: center;
       padding: 6px 14px;
       font-size: 11px;
       color: var(--faint);
       border-top: 1px solid var(--divider);
+      flex-shrink: 0;
     }
     .foot .sum { color: var(--dim); }
     .foot .sp { flex: 1; }
@@ -125,30 +126,31 @@
     <span class="status" id="status">加载中…</span>
     <button class="danger" id="clear">🧹 一键清空</button>
   </div>
-  <div class="inputrow">
-    <input id="expr" type="text" placeholder="输入表达式，回车计算…（支持 + - * / % 和括号）" autocomplete="off" />
-    <button id="eq">=</button>
-  </div>
-  <div id="paper"><div class="empty">稿纸是空的 — 在上方输入表达式开始计算</div></div>
+  <div id="paper"></div>
   <div class="foot">
-    <span id="count">0 条计算</span>
+    <span id="count">0 行</span>
     <span class="sum" id="sum"></span>
     <span class="sp"></span>
-    <span>暂存于 plugin-data/calc-paper/records.json · Esc 关闭</span>
+    <span>逐行输入，结果自动出现在该行下方 · Esc 关闭</span>
   </div>
   <script>
-    const exprEl = document.getElementById("expr");
+    const PAPER_FILE = "paper.txt";
     const paperEl = document.getElementById("paper");
     const statusEl = document.getElementById("status");
     const countEl = document.getElementById("count");
     const sumEl = document.getElementById("sum");
-    const RECORDS_FILE = "records.json";
-    let records = [];
+
+    let lines = [""];
     let saveTimer = null;
 
-    function setStatus(s) { statusEl.textContent = s; }
+    const setStatus = (s) => { statusEl.textContent = s; };
+    const round10 = (v) => Math.round(v * 1e10) / 1e10;
 
-    // --- the same recursive-descent evaluator main.js uses (no eval) -------
+    /**
+     * Arithmetic evaluator — same hand-written recursive descent parser the
+     * plugin's main.js uses (digits, + - * / %, parens, unary minus).
+     * No dynamic code execution. Returns a finite number or null.
+     */
     function evalExpr(raw) {
       const expr = String(raw == null ? "" : raw).trim().replace(/^[=]\s*/, "");
       if (expr.length === 0) return null;
@@ -202,113 +204,193 @@
         skipWs();
         if (pos !== expr.length) return null;
         if (typeof v !== "number" || !Number.isFinite(v)) return null;
-        return Math.round(v * 1e10) / 1e10;
+        return round10(v);
       } catch (_) {
         return null;
       }
     }
 
-    function fmtTime(at) {
-      try {
-        return new Date(at).toLocaleTimeString();
-      } catch (_) {
-        return "";
-      }
-    }
-
-    function render() {
-      paperEl.replaceChildren();
-      if (records.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "empty";
-        empty.textContent = "稿纸是空的 — 在上方输入表达式开始计算";
-        paperEl.appendChild(empty);
+    // ---------------------------------------------------------------- rows
+    function updateResult(row, i, forceSettled) {
+      const res = row.querySelector(".res");
+      const inp = row.querySelector(".expr");
+      const raw = lines[i] || "";
+      const v = evalExpr(raw);
+      // While the user is still typing on this line we stay quiet (an
+      // incomplete expression is not an error). `document.activeElement` is
+      // unreliable inside blur handlers, hence the explicit settled flag.
+      const focused = !forceSettled && document.activeElement === inp;
+      if (v !== null) {
+        res.className = "res";
+        res.textContent = "= " + v;
+      } else if (raw.trim() && !focused) {
+        res.className = "res bad";
+        res.textContent = "表达式无效";
       } else {
-        for (const rec of records) {
-          const row = document.createElement("div");
-          row.className = "row";
-          const bad = typeof rec.result !== "number";
-          const e = document.createElement("span");
-          e.className = "e";
-          e.textContent = rec.expr;
-          const r = document.createElement("span");
-          r.className = bad ? "r bad" : "r";
-          r.textContent = bad ? "= 无效表达式" : "= " + rec.result;
-          const t = document.createElement("span");
-          t.className = "t";
-          t.textContent = fmtTime(rec.at);
-          row.append(e, r, t);
-          paperEl.appendChild(row);
-        }
-        paperEl.scrollTop = paperEl.scrollHeight;
+        res.className = "res";
+        res.textContent = "";
       }
-      const nums = records.filter((r) => typeof r.result === "number");
-      countEl.textContent = records.length + " 条计算";
-      sumEl.textContent =
-        nums.length > 0
-          ? "· 合计 " + Math.round(nums.reduce((s, r) => s + r.result, 0) * 1e10) / 1e10
-          : "";
     }
 
-    function persist() {
-      setStatus("暂存中…");
-      uTools.writeFile(RECORDS_FILE, JSON.stringify(records)).then(
-        () => setStatus("已暂存 " + new Date().toLocaleTimeString()),
-        (e) => setStatus("暂存失败: " + (e && e.message ? e.message : e)),
-      );
+    function updateFooter() {
+      const used = lines.filter((l) => l.trim() !== "");
+      const nums = used.map(evalExpr).filter((v) => v !== null);
+      countEl.textContent = used.length + " 行";
+      sumEl.textContent = nums.length
+        ? "· 合计 " + round10(nums.reduce((a, b) => a + b, 0))
+        : "";
     }
 
-    function doCalc(raw) {
-      const expr = String(raw == null ? "" : raw).trim().replace(/^[=]\s*/, "");
-      if (!expr) return;
-      const v = evalExpr(expr);
-      records.push({ expr: expr, result: v === null ? "invalid" : v, at: Date.now() });
-      render();
-      persist();
-      exprEl.value = "";
-      exprEl.focus();
+    function focusLine(i) {
+      const inputs = paperEl.querySelectorAll(".expr");
+      if (!inputs.length) return;
+      const el = inputs[Math.min(Math.max(i, 0), inputs.length - 1)];
+      el.focus();
+      const n = el.value.length;
+      try { el.setSelectionRange(n, n); } catch (_) { /* ignore */ }
+      const row = el.closest(".line");
+      if (row) row.scrollIntoView({ block: "nearest" });
     }
 
-    document.getElementById("eq").onclick = () => doCalc(exprEl.value);
-    exprEl.addEventListener("keydown", (e) => {
+    function render(focusAt) {
+      paperEl.replaceChildren();
+      lines.forEach((text, i) => {
+        const row = document.createElement("div");
+        row.className = "line";
+        const inp = document.createElement("input");
+        inp.className = "expr";
+        inp.type = "text";
+        inp.value = text;
+        inp.spellcheck = false;
+        inp.autocomplete = "off";
+        if (lines.length === 1 && text === "") inp.placeholder = "例如：2+2*3";
+        inp.addEventListener("input", () => {
+          lines[i] = inp.value;
+          updateResult(row, i);
+          updateFooter();
+          scheduleSave();
+        });
+        inp.addEventListener("focus", () => {
+          paperEl.querySelectorAll(".line.active").forEach((el) => el.classList.remove("active"));
+          row.classList.add("active");
+        });
+        inp.addEventListener("blur", () => {
+          row.classList.remove("active");
+          updateResult(row, i, true);
+        });
+        inp.addEventListener("keydown", (e) => onKey(e, i, inp));
+        const res = document.createElement("div");
+        res.className = "res";
+        row.append(inp, res);
+        paperEl.appendChild(row);
+        updateResult(row, i);
+      });
+      updateFooter();
+      if (focusAt !== undefined) focusLine(focusAt);
+    }
+
+    function onKey(e, i, inp) {
       if (e.key === "Enter") {
+        if (e.isComposing) return; // let the IME commit first
         e.preventDefault();
-        doCalc(exprEl.value);
+        if (i + 1 < lines.length && lines[i + 1].trim() === "") {
+          focusLine(i + 1);
+          return;
+        }
+        if (lines[i].trim() === "" && i === lines.length - 1) return;
+        lines.splice(i + 1, 0, "");
+        render(i + 1);
+        scheduleSave();
+      } else if (e.key === "Backspace" && inp.value === "" && lines.length > 1) {
+        e.preventDefault();
+        lines.splice(i, 1);
+        render(Math.max(0, i - 1));
+        scheduleSave();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        focusLine(i - 1);
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        focusLine(i + 1);
+      }
+    }
+
+    // clicking empty paper space puts the caret back on the last line
+    paperEl.addEventListener("mousedown", (e) => {
+      if (e.target === paperEl) {
+        e.preventDefault();
+        focusLine(lines.length - 1);
       }
     });
 
+    // ---------------------------------------------------------- persistence
+    function scheduleSave() {
+      if (saveTimer) window.clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(() => { void save(); }, 400);
+    }
+
+    async function save() {
+      try {
+        await uTools.writeFile(PAPER_FILE, lines.join("\n"));
+        setStatus("已暂存 " + new Date().toLocaleTimeString());
+      } catch (e) {
+        setStatus("暂存失败: " + (e && e.message ? e.message : e));
+      }
+    }
+
     document.getElementById("clear").onclick = () => {
-      records = [];
-      render();
-      persist();
+      lines = [""];
+      render(0);
+      void save();
       uTools.toast("计算稿纸已清空 🧹");
     };
 
+    // --------------------------------------------------------------- load
     window.addEventListener("DOMContentLoaded", async () => {
-      // 1. context: keyword / selected result item
-      const ctx = await uTools.getDetailContext();
+      let ctx = null;
+      try { ctx = await uTools.getDetailContext(); } catch (_) { /* ignore */ }
       const item = ctx && ctx.item ? ctx.item : null;
 
-      // 2. restore the persisted paper (plugin private dir — no auth)
+      let migrated = false;
       try {
-        const s = await uTools.readFile(RECORDS_FILE);
-        const arr = JSON.parse(s);
-        records = Array.isArray(arr) ? arr : [];
+        const txt = await uTools.readFile(PAPER_FILE);
+        lines = String(txt).split("\n");
       } catch (_) {
-        records = []; // first use or corrupt file
-      }
-      render();
-      setStatus("已就绪 · " + records.length + " 条暂存");
-
-      // 3. from `计算 <expr>` in search: pre-fill (and auto-calc if valid)
-      if (item && item.data) {
-        if (item.data.action === "calc" && item.data.expr) {
-          doCalc(item.data.expr);
-        } else if (item.data.action === "open" && item.data.expr) {
-          exprEl.value = item.data.expr;
+        // one-time migration from the older records.json format
+        try {
+          const raw = await uTools.readFile("records.json");
+          const parsed = JSON.parse(raw);
+          lines = Array.isArray(parsed)
+            ? parsed.map((r) => String((r && r.expr) || "")).filter(Boolean)
+            : [];
+          migrated = lines.length > 0;
+        } catch (_) {
+          lines = [];
         }
       }
-      exprEl.focus();
+      if (lines.length === 0) lines = [""];
+
+      // The expression that opened this view (inline calc / auto-open). All
+      // trailing blank lines are dropped first so an empty paper never ends
+      // up with a stray blank row above the incoming expression.
+      const incoming =
+        item && item.data && item.data.action === "calc"
+          ? String(item.data.expr || "").trim()
+          : "";
+      let needsSave = migrated;
+      while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+      if (incoming && String(lines[lines.length - 1] || "") !== incoming) {
+        lines.push(incoming);
+        needsSave = true;
+      }
+      while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+      lines.push(""); // the paper always keeps one blank line to type on
+
+      render();
+      focusLine(lines.length - 1);
+      updateFooter();
+      setStatus("已就绪");
+      if (needsSave) void save(); // materialise paper.txt
     });
   </script>
 </body>

@@ -15,7 +15,7 @@
  * calculator uses: digits + operators only, no identifiers/quotes/semicolons.
  */
 
-const RECORDS_FILE = "records.json";
+const PAPER_FILE = "paper.txt";
 
 const CALC_ALLOWED = /^[\s\d+\-*/().%]+$/;
 
@@ -95,22 +95,21 @@ function evalExpr(raw) {
   }
 }
 
-function readRecords() {
+/** Read the paper as an array of expression lines (one per line). */
+function readLines() {
   return main
-    .readFile(RECORDS_FILE)
-    .then((s) => {
-      try {
-        const arr = JSON.parse(s);
-        return Array.isArray(arr) ? arr : [];
-      } catch {
-        return []; // corrupt/legacy file -> start fresh
-      }
-    })
+    .readFile(PAPER_FILE)
+    .then((s) =>
+      String(s)
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean),
+    )
     .catch(() => []);
 }
 
 async function clearRecords() {
-  await main.writeFile(RECORDS_FILE, "[]");
+  await main.writeFile(PAPER_FILE, "");
   main.toast("计算稿纸已清空 🧹");
 }
 
@@ -176,13 +175,10 @@ main.onMainMessage((msg) => {
   if (!msg || typeof msg !== "object") return;
   if (msg.type === "record" && msg.expr) {
     (async () => {
-      const records = await readRecords();
-      records.push({
-        expr: String(msg.expr),
-        result: msg.result,
-        at: Number(msg.at) || Date.now(),
-      });
-      await main.writeFile(RECORDS_FILE, JSON.stringify(records));
+      const lines = await readLines();
+      const expr = String(msg.expr).trim();
+      if (expr && lines[lines.length - 1] !== expr) lines.push(expr);
+      await main.writeFile(PAPER_FILE, lines.join("\n"));
       main.sendMainMessage({ type: "recorded", at: Date.now() });
     })().catch((e) => {
       main.sendMainMessage({

@@ -211,7 +211,11 @@ const uToolsApi = {
 
   // --- capabilities (all gated by the manifest permission model)
   readFile(path: string): Promise<string> {
-    return callCapability("fs.read", { path });
+    // The host answers { content }, but plugin pages expect the file text
+    // (matching plugin-host/bootstrap.js, which unwraps the same field).
+    return callCapability("fs.read", { path }).then(
+      (r) => r.content as string,
+    );
   },
   writeFile(path: string, content: string): Promise<{ ok: true }> {
     return callCapability("fs.write", { path, content });
