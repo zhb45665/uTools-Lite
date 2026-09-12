@@ -79,7 +79,8 @@ function getAmountConverter(): AmountConverter | null {
   if (amountConverter === undefined) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      amountConverter = require("../../plugins/amount/convert.js") as AmountConverter;
+      amountConverter =
+        require("../../plugins/amount/convert.js") as AmountConverter;
     } catch {
       amountConverter = null;
     }

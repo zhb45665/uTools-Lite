@@ -105,7 +105,12 @@
       if (sec === "") {
         if (out !== "" && !out.endsWith("零")) out += "零";
       } else {
-        if (out !== "" && g.length === 4 && g[0] === "0" && !out.endsWith("零")) {
+        if (
+          out !== "" &&
+          g.length === 4 &&
+          g[0] === "0" &&
+          !out.endsWith("零")
+        ) {
           out += "零";
         }
         out += sec + gu;
