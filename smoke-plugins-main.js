@@ -73,8 +73,9 @@ app.whenReady().then(async () => {
     );
     const paper = list.find((p) => p.id === "calc-paper");
     check(
-      "calc-paper declares fs",
-      JSON.stringify(paper.permissions) === JSON.stringify(["fs"]),
+      "calc-paper declares fs+clipboard",
+      JSON.stringify(paper.permissions) ===
+        JSON.stringify(["fs", "clipboard"]),
       paper.permissions,
     );
 

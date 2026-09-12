@@ -17,6 +17,7 @@
       --danger-soft: rgba(200, 60, 50, 0.12);
       --danger-text: #c03c32;
       --line-active: rgba(47, 95, 208, 0.07);
+      --ok: #1a7f37;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -31,6 +32,7 @@
         --danger-soft: rgba(230, 90, 80, 0.18);
         --danger-text: #e2726a;
         --line-active: rgba(109, 147, 232, 0.1);
+        --ok: #6cc187;
       }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -93,17 +95,25 @@
       outline: none;
       background: transparent;
       color: var(--input-text);
-      font: 16px/1.5 Consolas, "Courier New", monospace;
+      font: 20px/1.5 Consolas, "Courier New", monospace;
       letter-spacing: 0.2px;
       padding: 0;
     }
-    .expr::placeholder { color: var(--faint); font-size: 14px; }
+    .expr::placeholder { color: var(--faint); font-size: 17px; }
     .res {
-      font: 13px/1.45 Consolas, "Courier New", monospace;
+      font: 16px/1.45 Consolas, "Courier New", monospace;
       color: var(--accent);
-      padding: 1px 0 0 26px;
+      padding: 2px 0 0 30px;
+      cursor: pointer;
+      user-select: none;
     }
-    .res.bad { color: var(--danger-text); opacity: 0.65; font-size: 12px; }
+    .res.bad {
+      color: var(--danger-text);
+      opacity: 0.65;
+      font-size: 14px;
+      cursor: default;
+    }
+    .res.copied { color: var(--ok); }
     .res:empty { display: none; }
 
     .foot {
@@ -131,7 +141,7 @@
     <span id="count">0 行</span>
     <span class="sum" id="sum"></span>
     <span class="sp"></span>
-    <span>逐行输入，结果自动出现在该行下方 · Esc 关闭</span>
+    <span>逐行输入，结果自动出现在该行下方 · 双击结果可复制 · Esc 关闭</span>
   </div>
   <script>
     const PAPER_FILE = "paper.txt";
@@ -281,6 +291,8 @@
         inp.addEventListener("keydown", (e) => onKey(e, i, inp));
         const res = document.createElement("div");
         res.className = "res";
+        res.title = "双击复制结果";
+        row.dataset.i = String(i);
         row.append(inp, res);
         paperEl.appendChild(row);
         updateResult(row, i);
@@ -322,6 +334,38 @@
         focusLine(lines.length - 1);
       }
     });
+
+    // double-click a result line to copy just the number
+    paperEl.addEventListener("dblclick", (e) => {
+      const res = e.target && e.target.closest ? e.target.closest(".res") : null;
+      if (!res || res.classList.contains("bad")) return;
+      const row = res.closest(".line");
+      const i = row ? Number(row.dataset.i) : -1;
+      if (i < 0) return;
+      void copyResult(res, i);
+    });
+
+    async function copyResult(res, i) {
+      const v = evalExpr(lines[i] || "");
+      if (v === null) return;
+      const text = String(v);
+      try {
+        await uTools.copyText(text);
+        flashCopied(res, i, text);
+      } catch (e) {
+        setStatus("复制失败: " + (e && e.message ? e.message : e));
+      }
+    }
+
+    function flashCopied(res, i, text) {
+      if (res._flash) window.clearTimeout(res._flash);
+      res.classList.add("copied");
+      res.textContent = "= " + text + "   ✓ 已复制";
+      res._flash = window.setTimeout(() => {
+        res.classList.remove("copied");
+        updateResult(res.closest(".line"), i, true);
+      }, 900);
+    }
 
     // ---------------------------------------------------------- persistence
     function scheduleSave() {

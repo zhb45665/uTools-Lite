@@ -7,5 +7,5 @@
   "detail": "detail.html",
   "keywords": ["paper", "计算", "calc", "稿纸"],
   "icon": "🧾",
-  "permissions": ["fs"]
+  "permissions": ["fs", "clipboard"]
 }
