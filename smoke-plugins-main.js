@@ -218,6 +218,35 @@ app.whenReady().then(async () => {
       !/Math\.random/.test(genSrc) && /randomInt|getRandomValues/.test(genSrc),
     );
 
+    // --- 应用索引：商店 / 内置（UWP）应用没有任何 .lnk，必须从 Get-StartApps 补
+    const { scanApps } = require("./dist/main/file-index/app-index");
+    const apps = await scanApps();
+    const shellApps = apps.filter((a) => a.shell);
+    check(
+      "应用索引含商店/内置应用（UWP）",
+      shellApps.length >= 10,
+      { total: apps.length, shell: shellApps.length },
+    );
+    check(
+      "商店应用启动目标为 shell:AppsFolder\\<AppID>",
+      shellApps.length > 0 &&
+        shellApps.every((a) => a.path.startsWith("shell:AppsFolder\\")) &&
+        shellApps.every((a) => a.path.length > "shell:AppsFolder\\".length + 3),
+      shellApps.slice(0, 3).map((a) => a.path),
+    );
+    const calcApp = apps.find((a) => /计算器|Calculator/i.test(a.name));
+    check(
+      "内置「计算器」现在能搜到",
+      !!calcApp && calcApp.path.startsWith("shell:"),
+      calcApp ?? apps.filter((a) => /计算/.test(a.name)).map((a) => a.name),
+    );
+    check(
+      "经典 .lnk 应用未被丢掉（两者合并去重）",
+      apps.some((a) => a.path.toLowerCase().endsWith(".lnk")) &&
+        apps.some((a) => a.source === "store"),
+      { total: apps.length, lnk: apps.filter((a) => !a.shell).length },
+    );
+
     // --- pure path validation (no traversal)
     let traversalBlocked = false;
     try {
@@ -346,6 +375,12 @@ app.whenReady().then(async () => {
       "中文前缀：'金额大写' 也能命中金额插件",
       byNameAmount.length === 1,
       byNameAmount.map((i) => i.title),
+    );
+    const calcWord = await pm.searchPlugins("计算器");
+    check(
+      "'计算器' 不得命中插件（否则会抢在真正的应用前面）",
+      calcWord.length === 0,
+      calcWord.map((i) => i.title),
     );
     const asciiStrict = await pm.searchPlugins("passwordchange");
     check(

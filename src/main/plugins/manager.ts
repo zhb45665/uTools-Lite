@@ -190,6 +190,14 @@ export class PluginManager {
       } else if (ql.startsWith(kw + " ")) {
         value = q.slice(kw.length + 1);
       } else if (CJK_RE.test(kw) && ql.startsWith(kw)) {
+        // Chinese has no word boundaries, so typing a plugin's NAME must reach
+        // it even when the keyword is shorter (密码本 -> keyword 密码).
+        // But it must be a prefix of the plugin's OWN name: otherwise an
+        // unrelated word like "计算器" would hijack the calc-paper plugin
+        // (keyword 计算) and sit ABOVE the real Calculator app, so the app
+        // could never be launched by name.
+        const name = (this.manifests.get(pluginId)?.name ?? "").toLowerCase();
+        if (!name || !name.startsWith(ql)) continue;
         value = q.slice(kw.length).trim();
       } else {
         continue;

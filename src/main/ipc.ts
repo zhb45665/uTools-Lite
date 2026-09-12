@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { ipcMain, app, clipboard, dialog } from "electron";
 import { Ipc, SearchItem, CapabilityCall } from "../shared/ipc";
 import { SettingsStore } from "./store";
@@ -54,6 +55,18 @@ export function registerIpc(
           // Calculator result -> copy to clipboard.
           clipboard.writeText(payload);
           return { ok: true, copied: payload };
+        }
+        // Store / built-in (UWP) apps: no real path exists, so neither
+        // existsSync nor shell.openPath applies — the id is resolved by the
+        // shell namespace (explorer) instead.
+        if (payload.startsWith("shell:")) {
+          spawn("explorer.exe", [payload], {
+            detached: true,
+            stdio: "ignore",
+            windowsHide: true,
+          }).unref();
+          hideLauncher();
+          return { ok: true };
         }
         // file / app -> open via shell (apps are .lnk; opening executes them).
         // Guard first: a stale search hit (file moved/deleted, app .lnk whose

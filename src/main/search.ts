@@ -110,6 +110,12 @@ function tryAmount(
 
 // --- App fuzzy match ----------------------------------------------------
 
+const APP_SOURCE_LABEL: Record<string, string> = {
+  user: "用户应用",
+  system: "系统应用",
+  store: "商店 / 内置应用",
+};
+
 async function matchAppsAsync(query: string, limit = 8): Promise<SearchItem[]> {
   const apps = await scanApps();
   if (!apps.length || !query.trim()) return [];
@@ -118,7 +124,7 @@ async function matchAppsAsync(query: string, limit = 8): Promise<SearchItem[]> {
     id: `app:${i}:${a.name}`,
     type: "app" as const,
     title: a.name,
-    subtitle: a.source === "system" ? "System app" : "User app",
+    subtitle: APP_SOURCE_LABEL[a.source] ?? "应用",
     icon: "🚀",
     payload: a.path,
   }));
@@ -238,7 +244,12 @@ export async function runSearch(query: string): Promise<SearchResponse> {
   // Real Windows shell icons (cached across searches; emoji fallback when
   // the icon service is unavailable or a path yields no icon). The whole
   // batch is capped so a slow/cold service can never stall the search UI.
-  const iconTargets = [...response.files, ...response.apps];
+  // Real shell icons for files and classic .lnk apps. Store/builtin entries
+  // use `shell:AppsFolder\...` (no file path), so they are skipped here and
+  // keep the emoji fallback.
+  const iconTargets = [...response.files, ...response.apps].filter(
+    (it) => !String(it.payload).startsWith("shell:"),
+  );
   if (iconTargets.length > 0) {
     const urls = await Promise.race([
       Promise.all(iconTargets.map((it) => getIconUrl(it.payload))),

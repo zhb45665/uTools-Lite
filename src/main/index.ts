@@ -95,7 +95,11 @@ if (app.requestSingleInstanceLock()) {
 
     // Kick off background index work; never blocks startup.
     void scanApps()
-      .then((apps) => preloadIcons(apps.map((a) => a.path)))
+      .then((apps) =>
+        // Store/builtin apps are `shell:AppsFolder\...` (not real paths) and
+        // have no shell icon we can extract yet — skip them here.
+        preloadIcons(apps.filter((a) => !a.shell).map((a) => a.path)),
+      )
       .catch((e) => console.error("[init] app scan failed", e));
     void detectEverything()
       .then((es) => {
