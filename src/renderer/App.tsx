@@ -175,6 +175,20 @@ export default function App() {
     [showToast],
   );
 
+  // ------------------------------------------------- Enter handling (IME-safe)
+  // Chinese IMEs often consume the physical Enter key as their own "commit"
+  // key, so the page never sees key === "Enter" and the launcher appears dead.
+  // We therefore: (1) act on keydown, ignoring real IME composition; (2) fall
+  // back to keyup, which still arrives on some IMEs when keydown was eaten;
+  // (3) expose a clickable button (mouse is never intercepted by an IME).
+  const enterAt = useRef(0);
+  const runSelected = useCallback(() => {
+    const item = flat[selected];
+    if (!item) return;
+    enterAt.current = Date.now();
+    void launch(item);
+  }, [flat, selected, launch]);
+
   const onKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -183,14 +197,36 @@ export default function App() {
       e.preventDefault();
       setSelected((s) => Math.max(s - 1, 0));
     } else if (e.key === "Enter") {
+      if (e.nativeEvent.isComposing) return; // let the IME commit first
       e.preventDefault();
-      const item = flat[selected];
-      if (item) void launch(item);
+      runSelected();
     } else if (e.key === "Escape") {
       // Blur the input -> window blur -> main hides the launcher.
       inputRef.current?.blur();
     }
   };
+
+  const onKeyUp = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+    if (Date.now() - enterAt.current < 300) return; // keydown already handled it
+    runSelected();
+  };
+
+  // Auto-open the 计算稿纸 once a bare expression has settled ("输入 2*2 -> 弹出
+  // 稿纸"). The short delay keeps "2*23" from opening the paper at "2*2".
+  const autoExpr = useRef<string | null>(null);
+  useEffect(() => {
+    if (detail) return;
+    const top = flat[0];
+    if (!top || top.id !== "plugin:calc-paper:expr") return;
+    const expr = String(top.payload ?? "");
+    if (!expr || autoExpr.current === expr) return;
+    const timer = window.setTimeout(() => {
+      autoExpr.current = expr;
+      void launch(top);
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [flat, detail, launch]);
 
   // Esc in the parent frame while a detail view is open (iframe Esc is
   // handled by the plugin-frame preload).
@@ -321,11 +357,23 @@ export default function App() {
             composing.current = false;
             doSearch((e.target as HTMLInputElement).value);
           }}
+          onKeyUp={onKeyUp}
           placeholder="Search files, apps, plugins… (2+2*2 / note / b64)"
           autoFocus
           spellCheck={false}
         />
         {loading && <span className="spinner">▋</span>}
+        {flat.length > 0 && (
+          <button
+            type="button"
+            className="go-btn"
+            title="打开选中项（相当于回车）"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={runSelected}
+          >
+            打开
+          </button>
+        )}
       </div>
 
       <div className="results">

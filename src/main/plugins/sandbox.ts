@@ -58,6 +58,33 @@ function bootstrapPath(): string {
 
 const BOOTSTRAP = bootstrapPath();
 
+/**
+ * True when `p` is a real filesystem directory. Paths INSIDE an .asar
+ * (e.g. app.asar\plugins\foo) report true to fs.existsSync via Electron's
+ * fs patch — but they are virtual and cannot be used as a child's cwd.
+ */
+function isRealDir(p: string): boolean {
+  if (p.split(path.sep).some((seg) => seg.endsWith(".asar"))) return false;
+  return fs.existsSync(p);
+}
+
+/**
+ * Diagnostics: the packaged app's stdout is invisible, so sandbox spawn
+ * details (child stdout/stderr, exit, handshake timing) are mirrored to
+ * <userData>/sandbox-spawn.log to make "handshake failed" debuggable.
+ */
+function spawnLog(...parts: unknown[]): void {
+  try {
+    const line = `[${new Date().toISOString()}] ` + parts.join(" ") + "\n";
+    fs.appendFileSync(
+      path.join(app.getPath("userData"), "sandbox-spawn.log"),
+      line,
+    );
+  } catch {
+    /* best effort */
+  }
+}
+
 export class PluginSandbox {
   private proc: UtilityProcess | null = null;
   private nextId = 1;
@@ -76,8 +103,19 @@ export class PluginSandbox {
 
   /** Fork the sandbox and wait for the `ready` handshake (5s timeout). */
   async spawn(): Promise<void> {
+    // Builtin plugins live INSIDE app.asar in packaged builds — the folder is
+    // not a real directory, so it cannot be the child's cwd (spawn fails
+    // silently and the handshake times out). Fall back to the unpacked
+    // plugin-host dir, which always exists on the real filesystem.
+    const cwd = isRealDir(this.pluginDir)
+      ? this.pluginDir
+      : path.dirname(BOOTSTRAP);
+    const t0 = Date.now();
+    spawnLog(
+      `fork ${this.pluginId} cwd=${cwd} bootstrap=${BOOTSTRAP} pluginDir=${this.pluginDir}`,
+    );
     this.proc = utilityProcess.fork(BOOTSTRAP, [], {
-      cwd: this.pluginDir,
+      cwd,
       env: {
         ...process.env,
         UTL_PLUGIN_ID: this.pluginId,
@@ -85,8 +123,15 @@ export class PluginSandbox {
       },
     });
 
+    this.proc.stdout?.on("data", (d: Buffer) =>
+      spawnLog(`${this.pluginId} out: ${String(d).trim()}`),
+    );
+    this.proc.stderr?.on("data", (d: Buffer) =>
+      spawnLog(`${this.pluginId} err: ${String(d).trim()}`),
+    );
     this.proc.on("message", (msg: any) => this.onMessage(msg));
     this.proc.on("exit", (code) => {
+      spawnLog(`${this.pluginId} exit code=${code} after ${Date.now() - t0}ms`);
       // Fail the ready handshake early if the process died before ready.
       if (this.onceReady) {
         const once = this.onceReady;
@@ -97,8 +142,11 @@ export class PluginSandbox {
       this.proc = null;
       this.cb.onExit(code ?? 0);
     });
-    this.proc.on("error", (e) => {
-      console.error(`[sandbox:${this.pluginId}] process error`, e);
+    this.proc.on("error", (type, location, report) => {
+      console.error(`[sandbox:${this.pluginId}] process error`, type, location);
+      spawnLog(
+        `${this.pluginId} process error: ${type} @ ${location}: ${String(report).slice(0, 2000)}`,
+      );
     });
 
     const ready = new Promise<boolean>((resolve) => {
@@ -112,6 +160,9 @@ export class PluginSandbox {
       };
     });
     const ok = await ready;
+    spawnLog(
+      `${this.pluginId} handshake ${ok ? "OK" : "FAILED"} after ${Date.now() - t0}ms`,
+    );
     if (!ok) {
       this.kill();
       throw new Error(

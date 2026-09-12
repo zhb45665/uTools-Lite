@@ -56,6 +56,16 @@ export function createLauncherWindow(settings: SettingsStore): void {
       // contextIsolation + nodeIntegration:false keep the page away from
       // Node entirely; only the explicit window.launcher API is reachable.
       sandbox: false,
+      // nodeIntegrationInSubFrames — REQUIRED for plugin detail views. The
+      // preload branches on location.protocol: `plugin:` frames get
+      // window.uTools, the top frame gets window.launcher. Without this flag
+      // the preload never runs inside the detail iframe, so every plugin
+      // detail API (getDetailContext/readFile/writeFile/toast/capabilities)
+      // is missing and plugin pages silently fail.
+      // Safety: contextIsolation + nodeIntegration:false keep the plugin page
+      // away from Node; the preload only exposes uTools there (see
+      // src/preload/launcher.ts) and nothing at all in deeper frames.
+      nodeIntegrationInSubFrames: true,
     },
   });
 

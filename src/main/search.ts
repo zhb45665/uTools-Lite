@@ -97,6 +97,26 @@ export async function runSearch(query: string): Promise<SearchResponse> {
   const calc = tryCalc(q);
   if (calc) {
     response.calc = calc;
+    // A bare expression opens the 计算稿纸 plugin (records the calculation
+    // and supports one-click clear); the classic "copy result" command
+    // stays available as the second item.
+    const pm = getPluginManager();
+    if (pm && pm.list().some((p) => p.id === "calc-paper")) {
+      response.commands.unshift({
+        id: "plugin:calc-paper:expr",
+        type: "plugin" as const,
+        title: `🧾 ${calc.expression} = ${calc.result}`,
+        subtitle: "打开计算稿纸并暂存这次计算",
+        icon: "🧾",
+        payload: calc.expression,
+        pluginId: "calc-paper",
+        raw: {
+          keyword: "计算",
+          value: calc.expression,
+          data: { action: "calc", expr: calc.expression, result: calc.result },
+        },
+      });
+    }
     response.commands.push({
       id: "cmd:calc",
       type: "command",

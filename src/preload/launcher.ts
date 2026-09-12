@@ -300,6 +300,14 @@ function toastLocal(msg: string): void {
 export type UToolsApi = typeof uToolsApi;
 
 // ---------------------------------------------------------------- wiring
+// The preload now also runs inside subframes (nodeIntegrationInSubFrames),
+// which is how plugin detail iframes receive window.uTools. Only the TOP
+// frame may get `launcher`: a plugin page could otherwise create a nested
+// iframe (e.g. about:blank) and pick up the launcher API from inside it.
+const isTopFrame =
+  typeof process === "undefined" ||
+  (process as { isMainFrame?: boolean }).isMainFrame !== false;
+
 if (location.protocol === "plugin:") {
   // Esc inside the detail frame closes the view (acceptance: Esc -> 搜索态).
   window.addEventListener("keydown", (e) => {
@@ -309,6 +317,6 @@ if (location.protocol === "plugin:") {
     }
   });
   contextBridge.exposeInMainWorld("uTools", uToolsApi);
-} else {
+} else if (isTopFrame) {
   contextBridge.exposeInMainWorld("launcher", launcherApi);
 }

@@ -134,6 +134,22 @@ app.whenReady().then(async () => {
       calcItems,
     );
 
+    // --- combined search: bare expression -> 计算稿纸 first, copy kept
+    const { runSearch } = require("./dist/main/search");
+    const rs = await runSearch("2+2*3");
+    check(
+      "expression search -> calc-paper item first (opens 稿纸)",
+      !!rs.commands[0] &&
+        rs.commands[0].pluginId === "calc-paper" &&
+        /2\+2\*3 = 8/.test(rs.commands[0].title),
+      rs.commands.map((c) => c.title),
+    );
+    check(
+      "expression search keeps copy-result command",
+      rs.commands.some((c) => c.type === "command" && c.payload === "8"),
+      rs.commands.map((c) => c.type),
+    );
+
     // --- unit inline math via regex in plugin
     const unitItems = await pm.searchPlugins("unit 5km->mi");
     check(
