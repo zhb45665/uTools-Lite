@@ -152,13 +152,19 @@ app.whenReady().then(async () => {
     const pwList = list.find((p) => p.id === "password");
     check(
       "password declares fs+clipboard",
-      JSON.stringify(pwList.permissions) === JSON.stringify(["fs", "clipboard"]),
+      JSON.stringify(pwList.permissions) ===
+        JSON.stringify(["fs", "clipboard"]),
       pwList.permissions,
     );
 
     const secretBlob = pwVault.encryptVault("主密码-123", {
       entries: [
-        { id: "1", title: "GitHub", username: "me@x.com", password: "S3cret!中文" },
+        {
+          id: "1",
+          title: "GitHub",
+          username: "me@x.com",
+          password: "S3cret!中文",
+        },
       ],
     });
     const roundTrip = pwVault.decryptVault("主密码-123", secretBlob);
@@ -200,7 +206,8 @@ app.whenReady().then(async () => {
       genPw,
     );
     const uniqPw = new Set();
-    for (let i = 0; i < 50; i++) uniqPw.add(pwGen.generatePassword({ length: 12 }));
+    for (let i = 0; i < 50; i++)
+      uniqPw.add(pwGen.generatePassword({ length: 12 }));
     check("50 次生成无重复", uniqPw.size === 50, uniqPw.size);
     const genSrc = fs
       .readFileSync("./plugins/password/pwdgen.js", "utf8")
@@ -327,6 +334,26 @@ app.whenReady().then(async () => {
       lockedSearch.map((i) => i.title),
     );
 
+    // --- 中文无空格：插件名必须能命中关键词（曾经“密码本”什么都搜不到）
+    const byName = await pm.searchPlugins("密码本");
+    check(
+      "中文前缀：'密码本' 命中密码插件（插件名可直接搜）",
+      byName.length === 2 && /打开密码本/.test(byName[0].title),
+      byName.map((i) => i.title),
+    );
+    const byNameAmount = await pm.searchPlugins("金额大写");
+    check(
+      "中文前缀：'金额大写' 也能命中金额插件",
+      byNameAmount.length === 1,
+      byNameAmount.map((i) => i.title),
+    );
+    const asciiStrict = await pm.searchPlugins("passwordchange");
+    check(
+      "ASCII 关键词不放宽（passwordchange 不命中）",
+      asciiStrict.length === 0,
+      asciiStrict.map((i) => i.title),
+    );
+
     // --- no keyword hit
     const none = await pm.searchPlugins("zzz-no-plugin");
     check("non-matching query -> no plugin items", none.length === 0, none);
@@ -445,13 +472,13 @@ app.whenReady().then(async () => {
       path.join(capDir, "main.js"),
       'main.onInput("capplug", async (k, cb) => {\n' +
         '  let out = "";\n' +
-        '  try {\n' +
+        "  try {\n" +
         '    await main.writeFile("cap-probe.txt", "cap-ok-中文");\n' +
         '    const back = await main.readFile("cap-probe.txt");\n' +
         '    out = back + "|" + (await main.getDataDir());\n' +
         '  } catch (e) { out = "ERR:" + e.message; }\n' +
         '  cb([{ text: out, icon: "🧪", data: {} }]);\n' +
-        '});\n',
+        "});\n",
     );
     pm.rescan();
     const capItems = await pm.searchPlugins("capplug");
@@ -464,7 +491,8 @@ app.whenReady().then(async () => {
     // --- pure-command plugin (no detail view): select runs it + toasts.
     //     Coverage kept via a throwaway user plugin now that the builtin
     //     hello demo plugin is gone.
-    const cmdDir = path.join(pm.userPluginsRoot(), "cmdplug");    fs.mkdirSync(cmdDir, { recursive: true });
+    const cmdDir = path.join(pm.userPluginsRoot(), "cmdplug");
+    fs.mkdirSync(cmdDir, { recursive: true });
     fs.writeFileSync(
       path.join(cmdDir, "uTLS.json"),
       JSON.stringify({
@@ -512,10 +540,7 @@ app.whenReady().then(async () => {
         }
       }
     }
-    check(
-      "清理临时插件目录",
-      !fs.existsSync(cmdDir) && !fs.existsSync(capDir),
-    );
+    check("清理临时插件目录", !fs.existsSync(cmdDir) && !fs.existsSync(capDir));
   } catch (e) {
     failures++;
     console.log("FAIL  unhandled smoke error —", e && e.stack ? e.stack : e);

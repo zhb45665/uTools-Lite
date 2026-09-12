@@ -152,7 +152,8 @@ async function handleMessage(msg) {
           return;
         }
         const now = Date.now();
-        const existing = msg.entry && msg.entry.id ? findEntry(msg.entry.id) : null;
+        const existing =
+          msg.entry && msg.entry.id ? findEntry(msg.entry.id) : null;
         if (existing) {
           Object.assign(existing, data, { updatedAt: now });
         } else {
@@ -202,7 +203,10 @@ async function handleMessage(msg) {
             })();
           }, CLIP_CLEAR_MS);
         }
-        reply(id, { copied: true, clearInMs: msg.sensitive ? CLIP_CLEAR_MS : 0 });
+        reply(id, {
+          copied: true,
+          clearInMs: msg.sensitive ? CLIP_CLEAR_MS : 0,
+        });
         return;
       }
       default:
@@ -239,12 +243,20 @@ function openItems() {
   ];
 }
 
-main.onInput("密码", (_k, cb) => cb(openItems()));
-main.onInput("password", (_k, cb) => cb(openItems()));
-main.onInput("pwd", (_k, cb) => cb(openItems()));
+// 别名都注册上：宿主关键词表里有的关键词，这里必须有对应 handler，
+// 否则沙箱会返回空列表（看起来就像“插件不存在”）。
+const VAULT_KEYWORDS = ["密码", "密码本", "密码管理", "password", "pwd"];
+for (const kw of VAULT_KEYWORDS) {
+  main.onInput(kw, (_keyword, cb) => cb(openItems()));
+}
+for (const kw of VAULT_KEYWORDS) {
+  main.onInputSearch(kw, searchVault);
+}
 
 function searchVault(_keyword, value, cb) {
-  const q = String(value || "").trim().toLowerCase();
+  const q = String(value || "")
+    .trim()
+    .toLowerCase();
   if (!isUnlocked()) {
     cb([
       {
@@ -281,9 +293,6 @@ function searchVault(_keyword, value, cb) {
     })),
   );
 }
-
-main.onInputSearch("密码", searchVault);
-main.onInputSearch("password", searchVault);
 
 main.onInputSearch("生成密码", (_keyword, value, cb) => {
   const len = Number(String(value || "").replace(/[^\d]/g, "")) || 20;

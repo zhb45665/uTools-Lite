@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "main": "main.js",
   "detail": "detail.html",
-  "keywords": ["密码", "password", "pwd", "生成密码"],
+  "keywords": ["密码", "密码本", "密码管理", "password", "pwd", "生成密码"],
   "icon": "🔐",
   "permissions": ["fs", "clipboard"]
 }

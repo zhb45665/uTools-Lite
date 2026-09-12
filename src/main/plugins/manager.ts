@@ -53,6 +53,9 @@ function rmDirSafe(dir: string, attempts = 6, delayMs = 200): void {
 
 const IDLE_REAP_MS = 10 * 60 * 1000; // 10 min idle -> reap sandbox
 const REAP_INTERVAL_MS = 60 * 1000;
+/** CJK keywords get prefix matching: Chinese has no word boundaries. */
+const CJK_RE = /[\u3400-\u9fff\uf900-\ufaff]/;
+
 const PERM_PROMPT_TIMEOUT_MS = 120_000;
 
 interface ActiveDetail {
@@ -164,8 +167,13 @@ export class PluginManager {
   }
 
   /**
-   * Match a query against plugin keywords (exact or prefix + space).
-   * Longest keyword wins. Returns null when no plugin matches.
+   * Match a query against plugin keywords. Longest keyword wins.
+   *
+   * Accepts: exact match, `keyword + space + value`, and — for CJK keywords
+   * only — a bare prefix, because Chinese has no word boundaries: the plugin
+   * named 密码本 must be reachable by typing its name (previously "密码本"
+   * matched nothing while the keyword was "密码"). ASCII keywords stay strict
+   * so "passwordchange" is not treated as a match.
    */
   matchQuery(
     query: string,
@@ -181,6 +189,8 @@ export class PluginManager {
         value = "";
       } else if (ql.startsWith(kw + " ")) {
         value = q.slice(kw.length + 1);
+      } else if (CJK_RE.test(kw) && ql.startsWith(kw)) {
+        value = q.slice(kw.length).trim();
       } else {
         continue;
       }

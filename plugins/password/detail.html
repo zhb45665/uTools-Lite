@@ -89,6 +89,11 @@
     button.danger { background: var(--danger-soft); color: var(--danger-text); }
     .view { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
     .view[hidden] { display: none; }
+    /* `[hidden]` must beat author display rules: .lockbox / .tools declare
+       display:flex, which otherwise overrides the UA [hidden]{display:none}
+       (equal specificity, author sheet wins) — so a "hidden" panel kept
+       rendering and squeezed the visible one into a narrow strip. */
+    [hidden] { display: none !important; }
 
     /* ---- lock screen ---- */
     .lockbox {
@@ -407,12 +412,30 @@
       if (shown.length === 0) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = entries.length === 0 ? "还没有记录，点右上角「+ 新建」添加" : "没有匹配的记录";
+        if (entries.length === 0) {
+          empty.textContent = "还没有任何记录";
+          const btn = document.createElement("button");
+          btn.className = "primary";
+          btn.style.marginTop = "14px";
+          btn.textContent = "+ 新建第一条记录";
+          btn.onclick = () => openEditor(null);
+          empty.appendChild(document.createElement("br"));
+          empty.appendChild(btn);
+        } else {
+          empty.textContent = "没有匹配的记录";
+        }
         list.appendChild(empty);
+        setStatus(
+          entries.length === 0
+            ? "已解锁 · 还没有记录，点下方按钮新建"
+            : `已解锁 · ${entries.length} 条`,
+        );
+        return;
       }
       for (const e of shown) {
         const row = document.createElement("div");
         row.className = "entry";
+        row.dataset.id = e.id;
 
         const main = document.createElement("div");
         main.className = "e-main";
@@ -533,6 +556,21 @@
         entries = r.entries || [];
         $("f-err").textContent = "";
         closeEditor();
+        // 刚保存的那条往往在列表末尾：滚到它并短暂高亮，避免“保存了但看不到”
+        const newest = entries.reduce(
+          (a, b) => (!a || (b.updatedAt || 0) >= (a.updatedAt || 0) ? b : a),
+          null,
+        );
+        if (newest) {
+          const row = document.querySelector('.entry[data-id="' + newest.id + '"]');
+          if (row) {
+            row.scrollIntoView({ block: "nearest" });
+            row.style.outline = "2px solid var(--ok)";
+            setTimeout(() => {
+              row.style.outline = "";
+            }, 1200);
+          }
+        }
         setStatus(`已保存「${entry.title}」`);
       } catch (e) {
         $("f-err").textContent = e.message;
