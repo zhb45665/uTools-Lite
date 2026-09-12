@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>计算稿纸</title>
+  <style>
+    /* Theme follows the OS (Electron themeSource=system). */
+    :root {
+      --bg: #f7f7f9;
+      --text: #1c1c1e;
+      --dim: rgba(0, 0, 0, 0.4);
+      --faint: rgba(0, 0, 0, 0.3);
+      --divider: rgba(0, 0, 0, 0.08);
+      --input-text: #111113;
+      --btn-soft: rgba(0, 0, 0, 0.06);
+      --accent: #2f5fd0;
+      --danger-soft: rgba(200, 60, 50, 0.12);
+      --danger-text: #c03c32;
+      --row-hover: rgba(0, 0, 0, 0.04);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1a1a1e;
+        --text: #e8e8ea;
+        --dim: rgba(255, 255, 255, 0.4);
+        --faint: rgba(255, 255, 255, 0.3);
+        --divider: rgba(255, 255, 255, 0.08);
+        --input-text: #f2f2f4;
+        --btn-soft: rgba(255, 255, 255, 0.1);
+        --accent: #3f6ad8;
+        --danger-soft: rgba(230, 90, 80, 0.18);
+        --danger-text: #e2726a;
+        --row-hover: rgba(255, 255, 255, 0.05);
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px "Segoe UI", system-ui, sans-serif;
+    }
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--divider);
+    }
+    .bar .title { font-weight: 600; }
+    .bar .status { flex: 1; font-size: 12px; color: var(--dim); }
+    button {
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      border-radius: 7px;
+      padding: 6px 14px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    button.secondary { background: var(--btn-soft); color: var(--text); }
+    button.danger { background: var(--danger-soft); color: var(--danger-text); }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .inputrow {
+      display: flex;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--divider);
+    }
+    #expr {
+      flex: 1;
+      border: 1px solid var(--divider);
+      border-radius: 8px;
+      outline: none;
+      background: transparent;
+      color: var(--input-text);
+      padding: 8px 12px;
+      font: 15px Consolas, "Courier New", monospace;
+    }
+    #expr:focus { border-color: var(--accent); }
+    #eq { padding: 6px 18px; font-size: 15px; }
+    #paper {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 8px;
+    }
+    .row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 6px 8px;
+      border-radius: 7px;
+      font: 14px Consolas, "Courier New", monospace;
+    }
+    .row:hover { background: var(--row-hover); }
+    .row .e { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row .r { font-weight: 600; color: var(--accent); }
+    .row .r.bad { color: var(--danger-text); font-weight: 400; }
+    .row .t { font-size: 11px; color: var(--faint); font-family: "Segoe UI", system-ui, sans-serif; }
+    .empty {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--faint);
+      font-size: 13px;
+    }
+    .foot {
+      display: flex;
+      gap: 12px;
+      padding: 6px 14px;
+      font-size: 11px;
+      color: var(--faint);
+      border-top: 1px solid var(--divider);
+    }
+    .foot .sum { color: var(--dim); }
+    .foot .sp { flex: 1; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <span class="title">🧾 计算稿纸</span>
+    <span class="status" id="status">加载中…</span>
+    <button class="danger" id="clear">🧹 一键清空</button>
+  </div>
+  <div class="inputrow">
+    <input id="expr" type="text" placeholder="输入表达式，回车计算…（支持 + - * / % 和括号）" autocomplete="off" />
+    <button id="eq">=</button>
+  </div>
+  <div id="paper"><div class="empty">稿纸是空的 — 在上方输入表达式开始计算</div></div>
+  <div class="foot">
+    <span id="count">0 条计算</span>
+    <span class="sum" id="sum"></span>
+    <span class="sp"></span>
+    <span>暂存于 plugin-data/calc-paper/records.json · Esc 关闭</span>
+  </div>
+  <script>
+    const exprEl = document.getElementById("expr");
+    const paperEl = document.getElementById("paper");
+    const statusEl = document.getElementById("status");
+    const countEl = document.getElementById("count");
+    const sumEl = document.getElementById("sum");
+    const RECORDS_FILE = "records.json";
+    let records = [];
+    let saveTimer = null;
+
+    function setStatus(s) { statusEl.textContent = s; }
+
+    // --- the same recursive-descent evaluator main.js uses (no eval) -------
+    function evalExpr(raw) {
+      const expr = String(raw == null ? "" : raw).trim().replace(/^[=]\s*/, "");
+      if (expr.length === 0) return null;
+      if (!/\d/.test(expr)) return null;
+      if (!/[+\-*/%]/.test(expr)) return null;
+      if (!/^[\s\d+\-*/().%]+$/.test(expr)) return null;
+      let pos = 0;
+      const skipWs = () => { while (pos < expr.length && expr[pos] === " ") pos++; };
+      function parseFactor() {
+        skipWs();
+        if (expr[pos] === "-") { pos++; return -parseFactor(); }
+        if (expr[pos] === "(") {
+          pos++;
+          const v = parseExpression();
+          skipWs();
+          if (expr[pos] !== ")") throw new Error("unbalanced parens");
+          pos++;
+          return v;
+        }
+        const m = /^[0-9]+(\.[0-9]+)?/.exec(expr.slice(pos));
+        if (!m) throw new Error("bad number");
+        pos += m[0].length;
+        return parseFloat(m[0]);
+      }
+      function parseTerm() {
+        let v = parseFactor();
+        for (;;) {
+          skipWs();
+          const c = expr[pos];
+          if (c === "*" || c === "/" || c === "%") {
+            pos++;
+            const r = parseFactor();
+            v = c === "*" ? v * r : c === "/" ? v / r : v % r;
+          } else return v;
+        }
+      }
+      function parseExpression() {
+        let v = parseTerm();
+        for (;;) {
+          skipWs();
+          const c = expr[pos];
+          if (c === "+" || c === "-") {
+            pos++;
+            const r = parseTerm();
+            v = c === "+" ? v + r : v - r;
+          } else return v;
+        }
+      }
+      try {
+        const v = parseExpression();
+        skipWs();
+        if (pos !== expr.length) return null;
+        if (typeof v !== "number" || !Number.isFinite(v)) return null;
+        return Math.round(v * 1e10) / 1e10;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function fmtTime(at) {
+      try {
+        return new Date(at).toLocaleTimeString();
+      } catch (_) {
+        return "";
+      }
+    }
+
+    function render() {
+      paperEl.replaceChildren();
+      if (records.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "稿纸是空的 — 在上方输入表达式开始计算";
+        paperEl.appendChild(empty);
+      } else {
+        for (const rec of records) {
+          const row = document.createElement("div");
+          row.className = "row";
+          const bad = typeof rec.result !== "number";
+          const e = document.createElement("span");
+          e.className = "e";
+          e.textContent = rec.expr;
+          const r = document.createElement("span");
+          r.className = bad ? "r bad" : "r";
+          r.textContent = bad ? "= 无效表达式" : "= " + rec.result;
+          const t = document.createElement("span");
+          t.className = "t";
+          t.textContent = fmtTime(rec.at);
+          row.append(e, r, t);
+          paperEl.appendChild(row);
+        }
+        paperEl.scrollTop = paperEl.scrollHeight;
+      }
+      const nums = records.filter((r) => typeof r.result === "number");
+      countEl.textContent = records.length + " 条计算";
+      sumEl.textContent =
+        nums.length > 0
+          ? "· 合计 " + Math.round(nums.reduce((s, r) => s + r.result, 0) * 1e10) / 1e10
+          : "";
+    }
+
+    function persist() {
+      setStatus("暂存中…");
+      uTools.writeFile(RECORDS_FILE, JSON.stringify(records)).then(
+        () => setStatus("已暂存 " + new Date().toLocaleTimeString()),
+        (e) => setStatus("暂存失败: " + (e && e.message ? e.message : e)),
+      );
+    }
+
+    function doCalc(raw) {
+      const expr = String(raw == null ? "" : raw).trim().replace(/^[=]\s*/, "");
+      if (!expr) return;
+      const v = evalExpr(expr);
+      records.push({ expr: expr, result: v === null ? "invalid" : v, at: Date.now() });
+      render();
+      persist();
+      exprEl.value = "";
+      exprEl.focus();
+    }
+
+    document.getElementById("eq").onclick = () => doCalc(exprEl.value);
+    exprEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        doCalc(exprEl.value);
+      }
+    });
+
+    document.getElementById("clear").onclick = () => {
+      records = [];
+      render();
+      persist();
+      uTools.toast("计算稿纸已清空 🧹");
+    };
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      // 1. context: keyword / selected result item
+      const ctx = await uTools.getDetailContext();
+      const item = ctx && ctx.item ? ctx.item : null;
+
+      // 2. restore the persisted paper (plugin private dir — no auth)
+      try {
+        const s = await uTools.readFile(RECORDS_FILE);
+        const arr = JSON.parse(s);
+        records = Array.isArray(arr) ? arr : [];
+      } catch (_) {
+        records = []; // first use or corrupt file
+      }
+      render();
+      setStatus("已就绪 · " + records.length + " 条暂存");
+
+      // 3. from `计算 <expr>` in search: pre-fill (and auto-calc if valid)
+      if (item && item.data) {
+        if (item.data.action === "calc" && item.data.expr) {
+          doCalc(item.data.expr);
+        } else if (item.data.action === "open" && item.data.expr) {
+          exprEl.value = item.data.expr;
+        }
+      }
+      exprEl.focus();
+    });
+  </script>
+</body>
+</html>

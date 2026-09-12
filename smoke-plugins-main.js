@@ -54,13 +54,15 @@ app.whenReady().then(async () => {
     // --- discovery
     const list = pm.list();
     check(
-      "discover 3 builtin plugins",
-      list.length === 3,
+      "discover 4 builtin plugins",
+      list.length === 4,
       list.map((p) => p.id),
     );
     check(
       "plugin ids",
-      list.every((p) => ["hello", "notes", "unit"].includes(p.id)),
+      list.every((p) =>
+        ["hello", "notes", "unit", "calc-paper"].includes(p.id),
+      ),
       list.map((p) => p.id),
     );
     const notes = list.find((p) => p.id === "notes");
@@ -68,6 +70,12 @@ app.whenReady().then(async () => {
       "notes declares fs+clipboard",
       JSON.stringify(notes.permissions) === JSON.stringify(["fs", "clipboard"]),
       notes.permissions,
+    );
+    const paper = list.find((p) => p.id === "calc-paper");
+    check(
+      "calc-paper declares fs",
+      JSON.stringify(paper.permissions) === JSON.stringify(["fs"]),
+      paper.permissions,
     );
 
     // --- pure path validation (no traversal)
@@ -108,6 +116,22 @@ app.whenReady().then(async () => {
       "plugin status running after spawn",
       pm.get("notes").status === "running",
       pm.get("notes"),
+    );
+
+    // --- calc-paper: input items + inline evaluation
+    const paperItems = await pm.searchPlugins("paper");
+    check(
+      "input: 'paper' -> 打开稿纸 + 一键清空",
+      paperItems.length === 2 &&
+        /打开计算稿纸/.test(paperItems[0].title) &&
+        /清空/.test(paperItems[1].title),
+      paperItems,
+    );
+    const calcItems = await pm.searchPlugins("计算 2+2*3");
+    check(
+      "inputSearch: '计算 2+2*3' -> inline 2+2*3 = 8",
+      calcItems.length === 1 && /2\+2\*3 = 8/.test(calcItems[0].title),
+      calcItems,
     );
 
     // --- unit inline math via regex in plugin

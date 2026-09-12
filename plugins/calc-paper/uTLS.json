@@ -1,0 +1,11 @@
+{
+  "id": "calc-paper",
+  "name": "计算稿纸",
+  "description": "键盘即算，计算记录暂存本地，一键清空（详情视图）",
+  "version": "1.0.0",
+  "main": "main.js",
+  "detail": "detail.html",
+  "keywords": ["paper", "计算", "calc", "稿纸"],
+  "icon": "🧾",
+  "permissions": ["fs"]
+}
