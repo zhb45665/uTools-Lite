@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>金额大写</title>
+  <style>
+    /* Theme follows the OS (Electron themeSource=system). */
+    :root {
+      --bg: #f7f7f9;
+      --text: #1c1c1e;
+      --dim: rgba(0, 0, 0, 0.4);
+      --faint: rgba(0, 0, 0, 0.3);
+      --divider: rgba(0, 0, 0, 0.08);
+      --input-text: #111113;
+      --btn-soft: rgba(0, 0, 0, 0.06);
+      --accent: #2f5fd0;
+      --danger-text: #c03c32;
+      --row-hover: rgba(0, 0, 0, 0.045);
+      --ok: #1a7f37;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1a1a1e;
+        --text: #e8e8ea;
+        --dim: rgba(255, 255, 255, 0.4);
+        --faint: rgba(255, 255, 255, 0.3);
+        --divider: rgba(255, 255, 255, 0.08);
+        --input-text: #f2f2f4;
+        --btn-soft: rgba(255, 255, 255, 0.1);
+        --accent: #6d93e8;
+        --danger-text: #e2726a;
+        --row-hover: rgba(255, 255, 255, 0.06);
+        --ok: #6cc187;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px "Segoe UI", system-ui, sans-serif;
+    }
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--divider);
+      flex-shrink: 0;
+    }
+    .bar .title { font-weight: 600; }
+    .bar .status { flex: 1; font-size: 12px; color: var(--dim); }
+    button {
+      background: var(--btn-soft);
+      border: none;
+      color: var(--text);
+      border-radius: 7px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    button:hover { filter: brightness(0.96); }
+
+    .inputrow {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 14px 18px 10px;
+      border-bottom: 1px solid var(--divider);
+      flex-shrink: 0;
+    }
+    .inputrow .cur {
+      font: 24px/1 Consolas, "Courier New", monospace;
+      color: var(--dim);
+    }
+    .amount {
+      flex: 1;
+      border: none;
+      outline: none;
+      background: transparent;
+      color: var(--input-text);
+      font: 26px/1.3 Consolas, "Courier New", monospace;
+      letter-spacing: 0.5px;
+      padding: 0;
+    }
+    .amount::placeholder { color: var(--faint); font-size: 18px; letter-spacing: 0; }
+
+    .results { flex: 1; overflow-y: auto; padding: 8px 10px 20px; }
+    .row {
+      padding: 9px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .row:hover { background: var(--row-hover); }
+    .row .label {
+      font-size: 12px;
+      color: var(--dim);
+      margin-bottom: 3px;
+    }
+    .row .value {
+      font: 19px/1.5 Consolas, "Courier New", monospace;
+      word-break: break-all;
+    }
+    .row.primary .value {
+      font-size: 25px;
+      color: var(--accent);
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+    .row.copied .value { color: var(--ok); }
+    .empty {
+      padding: 26px 14px;
+      text-align: center;
+      color: var(--faint);
+      font-size: 13px;
+    }
+    .foot {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 6px 14px;
+      font-size: 11px;
+      color: var(--faint);
+      border-top: 1px solid var(--divider);
+      flex-shrink: 0;
+    }
+    .foot .sp { flex: 1; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <span class="title">💰 金额大写</span>
+    <span class="status" id="status">加载中…</span>
+    <button id="paste">📋 读剪贴板</button>
+    <button id="clear">清空</button>
+  </div>
+  <div class="inputrow">
+    <span class="cur">¥</span>
+    <input id="amount" class="amount" type="text" spellcheck="false" autocomplete="off"
+           placeholder="粘贴或输入金额，例如 1234.56" />
+  </div>
+  <div class="results" id="results"></div>
+  <div class="foot">
+    <span>双击任意结果即可复制 · 支持千分位 / 全角 / 负数 / ¥ 符号</span>
+    <span class="sp"></span>
+    <span>Esc 关闭</span>
+  </div>
+
+  <!-- 与插件沙箱 main.js 共用同一份转换实现 -->
+  <script src="convert.js"></script>
+  <script>
+    const amountEl = document.getElementById("amount");
+    const resultsEl = document.getElementById("results");
+    const statusEl = document.getElementById("status");
+
+    const setStatus = (s) => { statusEl.textContent = s; };
+    const ready = () => typeof AmountConvert === "object";
+
+    const ROWS = [
+      {
+        key: "capital",
+        label: "人民币大写",
+        primary: true,
+        get: (raw) => AmountConvert.toCapitalAmount(raw),
+      },
+      {
+        key: "prefixed",
+        label: "带人民币前缀（票据写法）",
+        get: (raw) => {
+          const c = AmountConvert.toCapitalAmount(raw);
+          return c ? "人民币" + c : null;
+        },
+      },
+      {
+        key: "plain",
+        label: "规范数字",
+        get: (raw) => AmountConvert.formatCurrency(raw),
+      },
+    ];
+
+    function render(raw) {
+      resultsEl.replaceChildren();
+      const typed = String(amountEl.value || "").trim();
+      const rows = [];
+      for (const r of ROWS) {
+        const v = r.get(raw);
+        if (v) rows.push({ row: r, value: v });
+      }
+      if (rows.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = typed
+          ? "不是有效金额，请检查输入"
+          : "在上方粘贴或输入金额，例如 1234.56";
+        resultsEl.appendChild(empty);
+        return;
+      }
+      for (const { row: r, value } of rows) {
+        const el = document.createElement("div");
+        el.className = "row" + (r.primary ? " primary" : "");
+        el.dataset.copy = value;
+        el.title = "双击复制";
+        const label = document.createElement("div");
+        label.className = "label";
+        label.textContent = r.label;
+        const val = document.createElement("div");
+        val.className = "value";
+        val.textContent = value;
+        el.append(label, val);
+        resultsEl.appendChild(el);
+      }
+    }
+
+    const convert = () => render(amountEl.value);
+
+    amountEl.addEventListener("input", convert);
+
+    resultsEl.addEventListener("dblclick", (e) => {
+      const row = e.target && e.target.closest ? e.target.closest(".row") : null;
+      if (row) void copyValue(row);
+    });
+
+    async function copyValue(row) {
+      const text = row.dataset.copy || "";
+      if (!text) return;
+      try {
+        await uTools.copyText(text);
+        flash(row, text);
+      } catch (err) {
+        setStatus("复制失败: " + (err && err.message ? err.message : err));
+      }
+    }
+
+    function flash(row, text) {
+      if (row._flash) window.clearTimeout(row._flash);
+      const val = row.querySelector(".value");
+      row.classList.add("copied");
+      val.textContent = text + "   ✓ 已复制";
+      row._flash = window.setTimeout(() => {
+        row.classList.remove("copied");
+        val.textContent = text;
+      }, 900);
+    }
+
+    document.getElementById("clear").onclick = () => {
+      amountEl.value = "";
+      convert();
+      amountEl.focus();
+      setStatus("已清空");
+    };
+
+    document.getElementById("paste").onclick = async () => {
+      try {
+        const text = await uTools.getClipboardText();
+        if (!ready() || AmountConvert.toCapitalAmount(text) === null) {
+          setStatus("剪贴板里没有可用金额");
+          return;
+        }
+        amountEl.value = String(text).trim();
+        convert();
+        amountEl.focus();
+        setStatus("已从剪贴板读取");
+      } catch (err) {
+        setStatus("读剪贴板失败: " + (err && err.message ? err.message : err));
+      }
+    };
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      if (!ready()) {
+        setStatus("转换模块加载失败");
+        return;
+      }
+      let ctx = null;
+      try { ctx = await uTools.getDetailContext(); } catch (_) { /* ignore */ }
+      const item = ctx && ctx.item ? ctx.item : null;
+      const fromSearch = item && item.data ? String(item.data.value || "") : "";
+      if (fromSearch && AmountConvert.toCapitalAmount(fromSearch) !== null) {
+        amountEl.value = fromSearch;
+        convert();
+        amountEl.focus();
+        setStatus("来自搜索的金额");
+        return;
+      }
+      // 打开即自动读剪贴板：复制了金额 -> 打开面板 -> 已经转好了
+      try {
+        const clip = await uTools.getClipboardText();
+        const text = String(clip == null ? "" : clip).trim();
+        if (text && text.length <= 32 && AmountConvert.toCapitalAmount(text) !== null) {
+          amountEl.value = text;
+          convert();
+          amountEl.focus();
+          setStatus("已自动读取剪贴板");
+          return;
+        }
+      } catch (_) { /* clipboard unavailable -> manual input */ }
+      convert();
+      amountEl.focus();
+      setStatus("就绪");
+    });
+  </script>
+</body>
+</html>

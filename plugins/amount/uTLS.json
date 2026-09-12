@@ -1,0 +1,11 @@
+{
+  "id": "amount",
+  "name": "金额大写",
+  "description": "金额大小写转换：粘贴数字即出人民币大写（角分 / 负数 / 千分位 / 全角）",
+  "version": "1.0.0",
+  "main": "main.js",
+  "detail": "detail.html",
+  "keywords": ["金额", "大写", "amount", "rmb"],
+  "icon": "💰",
+  "permissions": ["clipboard"]
+}

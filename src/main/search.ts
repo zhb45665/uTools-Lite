@@ -64,6 +64,49 @@ function iconForPath(p: string): string {
   return map[ext] ?? "📄";
 }
 
+// --- 金额大写 -------------------------------------------------------------
+// The converter lives inside the amount plugin so that the sandbox, the
+// detail page and this search path all share ONE implementation. It is
+// loaded lazily: if the plugin folder is missing, search still works.
+type AmountConverter = {
+  toCapitalAmount: (raw: string) => string | null;
+  formatCurrency: (raw: string) => string | null;
+};
+
+let amountConverter: AmountConverter | null | undefined;
+
+function getAmountConverter(): AmountConverter | null {
+  if (amountConverter === undefined) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      amountConverter = require("../../plugins/amount/convert.js") as AmountConverter;
+    } catch {
+      amountConverter = null;
+    }
+  }
+  return amountConverter;
+}
+
+/** Currency symbol/unit marker. A decimal point also counts as a signal. */
+const AMOUNT_MARK = /[¥￥$]|人民币|rmb|cny|元/i;
+
+/**
+ * Detect an unambiguous amount. A bare integer ("2024") is deliberately left
+ * alone so normal file/app searches are never hijacked.
+ */
+function tryAmount(
+  raw: string,
+): { value: string; capital: string; plain: string } | null {
+  const q = raw.trim();
+  if (!q || q.length > 28) return null;
+  if (!/[.．]/.test(q) && !AMOUNT_MARK.test(q)) return null;
+  const conv = getAmountConverter();
+  if (!conv) return null;
+  const capital = conv.toCapitalAmount(q);
+  if (!capital) return null;
+  return { value: q, capital, plain: conv.formatCurrency(q) ?? "" };
+}
+
 // --- App fuzzy match ----------------------------------------------------
 
 async function matchAppsAsync(query: string, limit = 8): Promise<SearchItem[]> {
@@ -125,6 +168,28 @@ export async function runSearch(query: string): Promise<SearchResponse> {
       icon: "🧮",
       payload: calc.result,
     });
+  }
+
+  // 金额大写：粘贴 "¥1,234.56" / "1234.56" 直接出中文大写（回车进面板继续转）
+  const amount = tryAmount(q);
+  if (amount) {
+    const pm = getPluginManager();
+    if (pm && pm.list().some((p) => p.id === "amount")) {
+      response.commands.unshift({
+        id: "plugin:amount:value",
+        type: "plugin" as const,
+        title: `💰 ${amount.capital}`,
+        subtitle: `${amount.plain} · 回车打开金额大写转换`,
+        icon: "💰",
+        payload: amount.value,
+        pluginId: "amount",
+        raw: {
+          keyword: "金额",
+          value: amount.value,
+          data: { action: "convert", value: amount.value },
+        },
+      });
+    }
   }
 
   // File search via Everything (instant when available), plugin keyword

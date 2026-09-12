@@ -54,14 +54,14 @@ app.whenReady().then(async () => {
     // --- discovery
     const list = pm.list();
     check(
-      "discover 4 builtin plugins",
-      list.length === 4,
+      "discover 5 builtin plugins",
+      list.length === 5,
       list.map((p) => p.id),
     );
     check(
       "plugin ids",
       list.every((p) =>
-        ["hello", "notes", "unit", "calc-paper"].includes(p.id),
+        ["hello", "notes", "unit", "calc-paper", "amount"].includes(p.id),
       ),
       list.map((p) => p.id),
     );
@@ -74,9 +74,54 @@ app.whenReady().then(async () => {
     const paper = list.find((p) => p.id === "calc-paper");
     check(
       "calc-paper declares fs+clipboard",
-      JSON.stringify(paper.permissions) ===
-        JSON.stringify(["fs", "clipboard"]),
+      JSON.stringify(paper.permissions) === JSON.stringify(["fs", "clipboard"]),
       paper.permissions,
+    );
+    const amount = list.find((p) => p.id === "amount");
+    check(
+      "amount declares clipboard",
+      JSON.stringify(amount.permissions) === JSON.stringify(["clipboard"]),
+      amount.permissions,
+    );
+    check("amount plugin ships detail view", amount.hasDetail === true, amount);
+
+    // --- 金额大写转换算法（官方票据例子 + 边界 + 非法输入）
+    const conv = require("./plugins/amount/convert.js");
+    const convCases = [
+      ["1234.56", "壹仟贰佰叁拾肆元伍角陆分"],
+      ["1409.50", "壹仟肆佰零玖元伍角整"],
+      ["6007.14", "陆仟零柒元壹角肆分"],
+      ["107000.53", "壹拾万柒仟元伍角叁分"],
+      ["10000", "壹万元整"],
+      ["100.05", "壹佰元零伍分"],
+      ["0", "零元整"],
+      ["100000001", "壹亿零壹元整"],
+      ["-1234.5", "负壹仟贰佰叁拾肆元伍角整"],
+      ["¥1,234.56", "壹仟贰佰叁拾肆元伍角陆分"],
+      ["１２３４．５６", "壹仟贰佰叁拾肆元伍角陆分"],
+      ["1.005", "壹元零壹分"],
+      ["0.999", "壹元整"],
+      ["99999999999.99", "玖佰玖拾玖亿玖仟玖佰玖拾玖万玖仟玖佰玖拾玖元玖角玖分"],
+    ];
+    const convBad = convCases.filter(
+      ([input, want]) => conv.toCapitalAmount(input) !== want,
+    );
+    check(
+      "金额大写转换 14/14（含票据例子/全角/负数/四舍五入）",
+      convBad.length === 0,
+      convBad.map(([i]) => `${i} -> ${conv.toCapitalAmount(i)}`),
+    );
+    check(
+      "非法金额被拒绝（空/字母/IP/多小数点）",
+      ["", "abc", "192.168.1.1", "1.2.3", "1e5"].every(
+        (s) => conv.toCapitalAmount(s) === null,
+      ),
+    );
+    check(
+      "规范小写 = 千分位两位小数",
+      conv.formatCurrency("1234.5") === "¥1,234.50" &&
+        conv.formatCurrency("-1234.5") === "-¥1,234.50",
+      [conv.formatCurrency("1234.5"), conv.formatCurrency("-1234.5")],
     );
 
     // --- pure path validation (no traversal)
@@ -149,6 +194,29 @@ app.whenReady().then(async () => {
       "expression search keeps copy-result command",
       rs.commands.some((c) => c.type === "command" && c.payload === "8"),
       rs.commands.map((c) => c.type),
+    );
+
+    // --- 金额大写：插件关键词 + 搜索层集成
+    const amountItems = await pm.searchPlugins("金额 1234.56");
+    check(
+      "inputSearch: '金额 1234.56' -> 大写金额",
+      amountItems.length === 1 &&
+        /壹仟贰佰叁拾肆元伍角陆分/.test(amountItems[0].title),
+      amountItems.map((i) => i.title),
+    );
+    const rsAmount = await runSearch("¥1,234.56");
+    check(
+      "粘贴 ¥1,234.56 -> 金额大写项排第一",
+      !!rsAmount.commands[0] &&
+        rsAmount.commands[0].pluginId === "amount" &&
+        /壹仟贰佰叁拾肆元伍角陆分/.test(rsAmount.commands[0].title),
+      rsAmount.commands.map((c) => c.title),
+    );
+    const rsPlainInt = await runSearch("2024");
+    check(
+      "纯整数 2024 不触发金额（不抢文件/应用搜索）",
+      !rsPlainInt.commands.some((c) => c.pluginId === "amount"),
+      rsPlainInt.commands.map((c) => c.title),
     );
 
     // --- unit inline math via regex in plugin
