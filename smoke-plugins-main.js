@@ -49,20 +49,31 @@ app.whenReady().then(async () => {
 
   try {
     const pm = createPluginManager(() => fakeWin);
+    // Self-heal: a previous run may have left its throwaway plugin behind
+    // (Windows keeps the dir locked while a sandbox holds it as cwd), and
+    // discovery below would then report an unexpected plugin.
+    for (const stale of ["cmdplug", "badplug"]) {
+      try {
+        fs.rmSync(path.join(pm.userPluginsRoot(), stale), {
+          recursive: true,
+          force: true,
+        });
+      } catch {
+        /* still locked; the run below will surface it */
+      }
+    }
     pm.init();
 
     // --- discovery
     const list = pm.list();
     check(
-      "discover 5 builtin plugins",
-      list.length === 5,
+      "discover 3 builtin plugins",
+      list.length === 3,
       list.map((p) => p.id),
     );
     check(
       "plugin ids",
-      list.every((p) =>
-        ["hello", "notes", "unit", "calc-paper", "amount"].includes(p.id),
-      ),
+      list.every((p) => ["notes", "calc-paper", "amount"].includes(p.id)),
       list.map((p) => p.id),
     );
     const notes = list.find((p) => p.id === "notes");
@@ -152,12 +163,12 @@ app.whenReady().then(async () => {
       resolvePluginPath("notes", "a/b.txt"),
     );
 
-    // --- keyword match + lazy spawn + input
-    const hiItems = await pm.searchPlugins("hello");
+    // --- keyword match + lazy spawn + input (pure `keyword` -> onInput)
+    const noteHit = await pm.searchPlugins("note");
     check(
-      "input: 'hello' returns greet item",
-      hiItems.length === 1 && /招呼/.test(hiItems[0].title),
-      hiItems,
+      "input: 'note' -> 打开随手笔记",
+      noteHit.length === 2 && /打开随手笔记/.test(noteHit[0].title),
+      noteHit.map((i) => i.title),
     );
 
     // --- inputSearch (lazy spawn on first hit)
@@ -228,15 +239,6 @@ app.whenReady().then(async () => {
       rsPlainInt.commands.map((c) => c.title),
     );
 
-    // --- unit inline math via regex in plugin
-    const unitItems = await pm.searchPlugins("unit 5km->mi");
-    check(
-      "inputSearch: 'unit 5km->mi' inline result",
-      unitItems.length === 1 &&
-        /5 km = 3\.10685596 mi/.test(unitItems[0].title),
-      unitItems,
-    );
-
     // --- no keyword hit
     const none = await pm.searchPlugins("zzz-no-plugin");
     check("non-matching query -> no plugin items", none.length === 0, none);
@@ -270,10 +272,10 @@ app.whenReady().then(async () => {
     });
     check("detail fs.read roundtrip", rd && rd.content === "hello-p2", rd);
 
-    // --- permission model: hello has NO fs permission
+    // --- permission model: amount declares only clipboard (no fs)
     let noPermRejected = false;
     try {
-      await pm.detailCapability("hello", "fs.read", { path: "x.txt" });
+      await pm.detailCapability("amount", "fs.read", { path: "x.txt" });
     } catch (e) {
       noPermRejected = /no "fs" permission/.test(e.message);
     }
@@ -335,18 +337,57 @@ app.whenReady().then(async () => {
     pm.rescan();
     check("rescan removes uninstalled plugin", !pm.get("badplug"));
 
-    // --- exit event to renderer (toast from hello plugin)
-    const greet = await pm.searchPlugins("hello");
-    await pm.handleSelect(greet[0]);
-    await new Promise((r) => setTimeout(r, 300));
+    // --- pure-command plugin (no detail view): select runs it + toasts.
+    //     Coverage kept via a throwaway user plugin now that the builtin
+    //     hello demo plugin is gone.
+    const cmdDir = path.join(pm.userPluginsRoot(), "cmdplug");
+    fs.mkdirSync(cmdDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(cmdDir, "uTLS.json"),
+      JSON.stringify({
+        id: "cmdplug",
+        name: "Cmd Plug",
+        main: "main.js",
+        keywords: ["cmdplug"],
+        permissions: [],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(cmdDir, "main.js"),
+      'main.onInput("cmdplug", (k, cb) => cb([{ text: "CMD 执行", icon: "⚡", data: {} }]));\n' +
+        'main.onSelect(() => main.toast("纯命令插件已执行 ✅"));\n',
+    );
+    pm.rescan();
+    const cmdItems = await pm.searchPlugins("cmdplug");
+    check(
+      "纯命令插件 keyword 命中",
+      cmdItems.length === 1 && /CMD/.test(cmdItems[0].title),
+      cmdItems,
+    );
+    await pm.handleSelect(cmdItems[0]);
+    await new Promise((r) => setTimeout(r, 400));
     const toastEvt = sentEvents.find(([ch]) => ch === "plugin:evt-toast");
     check(
-      "hello onSelect -> toast event to renderer",
+      "纯命令插件 onSelect -> toast 事件到渲染层",
       !!toastEvt,
       sentEvents.map((e) => e[0]),
     );
-
+    // Kill the sandboxes FIRST: on Windows a live utilityProcess holds its
+    // cwd, so the temp plugin dir stays locked (EBUSY) while the child runs.
     pm.shutdown();
+    for (let i = 0; ; i++) {
+      try {
+        fs.rmSync(cmdDir, { recursive: true, force: true });
+        break;
+      } catch (e) {
+        if (i >= 9 || e.code !== "EBUSY") throw e;
+        const end = Date.now() + 200;
+        while (Date.now() < end) {
+          /* spin */
+        }
+      }
+    }
+    check("清理临时命令插件目录", !fs.existsSync(cmdDir));
   } catch (e) {
     failures++;
     console.log("FAIL  unhandled smoke error —", e && e.stack ? e.stack : e);
