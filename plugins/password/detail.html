@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>密码本</title>
+  <style>
+    /* Theme follows the OS (Electron themeSource=system). */
+    :root {
+      --bg: #f7f7f9;
+      --text: #1c1c1e;
+      --dim: rgba(0, 0, 0, 0.4);
+      --faint: rgba(0, 0, 0, 0.3);
+      --divider: rgba(0, 0, 0, 0.08);
+      --input-text: #111113;
+      --btn-soft: rgba(0, 0, 0, 0.06);
+      --accent: #2f5fd0;
+      --accent-fg: #ffffff;
+      --danger-soft: rgba(200, 60, 50, 0.12);
+      --danger-text: #c03c32;
+      --row-hover: rgba(0, 0, 0, 0.045);
+      --field-bg: rgba(0, 0, 0, 0.035);
+      --ok: #1a7f37;
+      --warn: #b26a00;
+      --weak: #c03c32;
+      --mono: Consolas, "Courier New", monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1a1a1e;
+        --text: #e8e8ea;
+        --dim: rgba(255, 255, 255, 0.4);
+        --faint: rgba(255, 255, 255, 0.3);
+        --divider: rgba(255, 255, 255, 0.08);
+        --input-text: #f2f2f4;
+        --btn-soft: rgba(255, 255, 255, 0.1);
+        --accent: #6d93e8;
+        --accent-fg: #10131a;
+        --danger-soft: rgba(230, 90, 80, 0.18);
+        --danger-text: #e2726a;
+        --row-hover: rgba(255, 255, 255, 0.06);
+        --field-bg: rgba(255, 255, 255, 0.06);
+        --ok: #6cc187;
+        --warn: #e0a45a;
+        --weak: #e2726a;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px "Segoe UI", system-ui, sans-serif;
+    }
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 14px;
+      border-bottom: 1px solid var(--divider);
+      flex-shrink: 0;
+    }
+    .bar .title { font-weight: 600; }
+    .bar .status { flex: 1; font-size: 12px; color: var(--dim); }
+    .tabs { display: flex; gap: 4px; }
+    .tab {
+      background: transparent;
+      border: none;
+      color: var(--dim);
+      border-radius: 7px;
+      padding: 5px 12px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .tab.active { background: var(--btn-soft); color: var(--text); font-weight: 600; }
+    button {
+      background: var(--btn-soft);
+      border: none;
+      color: var(--text);
+      border-radius: 7px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button:hover { filter: brightness(0.96); }
+    button.primary { background: var(--accent); color: var(--accent-fg); }
+    button.danger { background: var(--danger-soft); color: var(--danger-text); }
+    .view { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .view[hidden] { display: none; }
+
+    /* ---- lock screen ---- */
+    .lockbox {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 20px 24px;
+    }
+    .lockicon { font-size: 34px; }
+    .locktitle { font-size: 15px; font-weight: 600; }
+    .lockhint { font-size: 12px; color: var(--faint); text-align: center; line-height: 1.7; }
+    input.master {
+      width: 260px;
+      background: var(--field-bg);
+      border: 1px solid var(--divider);
+      border-radius: 8px;
+      padding: 9px 12px;
+      color: var(--input-text);
+      font: 15px var(--mono);
+      outline: none;
+      text-align: center;
+    }
+    input.master:focus { border-color: var(--accent); }
+    .err { color: var(--danger-text); font-size: 12px; min-height: 16px; }
+
+    /* ---- vault ---- */
+    .tools {
+      display: flex;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--divider);
+      flex-shrink: 0;
+    }
+    .filter {
+      flex: 1;
+      background: var(--field-bg);
+      border: 1px solid var(--divider);
+      border-radius: 8px;
+      padding: 7px 11px;
+      color: var(--input-text);
+      font-size: 14px;
+      outline: none;
+    }
+    .filter:focus { border-color: var(--accent); }
+    .list { flex: 1; overflow-y: auto; padding: 6px 8px 18px; }
+    .entry {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      border-radius: 8px;
+    }
+    .entry:hover { background: var(--row-hover); }
+    .e-main { flex: 1; min-width: 0; }
+    .e-title { font-weight: 600; font-size: 15px; }
+    .e-sub { font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .e-pass {
+      font: 14px var(--mono);
+      color: var(--dim);
+      cursor: pointer;
+      user-select: none;
+      min-width: 82px;
+      text-align: right;
+    }
+    .e-pass.shown { color: var(--ok); }
+    .e-actions { display: flex; gap: 5px; }
+    .e-actions button { padding: 4px 9px; font-size: 12px; }
+    .empty { padding: 26px 14px; text-align: center; color: var(--faint); font-size: 13px; }
+
+    /* ---- editor ---- */
+    .editor { flex: 1; overflow-y: auto; padding: 12px 16px 20px; }
+    .field { margin-bottom: 10px; }
+    .field label { display: block; font-size: 12px; color: var(--dim); margin-bottom: 4px; }
+    .field input {
+      width: 100%;
+      background: var(--field-bg);
+      border: 1px solid var(--divider);
+      border-radius: 8px;
+      padding: 8px 11px;
+      color: var(--input-text);
+      font-size: 14px;
+      outline: none;
+    }
+    .field input:focus { border-color: var(--accent); }
+    .field input.mono { font-family: var(--mono); }
+    .pwwrap { display: flex; gap: 6px; }
+    .pwwrap input { flex: 1; }
+    .editrow { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+
+    /* ---- generator ---- */
+    .gen { flex: 1; overflow-y: auto; padding: 16px 18px 20px; }
+    .genpw {
+      font: 26px/1.4 var(--mono);
+      letter-spacing: 1px;
+      color: var(--accent);
+      word-break: break-all;
+      padding: 10px 12px;
+      border-radius: 9px;
+      background: var(--field-bg);
+      cursor: pointer;
+      user-select: none;
+    }
+    .genpw.copied { color: var(--ok); }
+    .genrow { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+    .genrow .lab { font-size: 13px; color: var(--dim); width: 52px; }
+    .genrow input[type="range"] { flex: 1; }
+    .genrow .len { font: 16px var(--mono); width: 34px; text-align: right; }
+    .opts { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; font-size: 13px; }
+    .opts label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .bar-strength { display: flex; gap: 4px; margin-top: 14px; align-items: center; }
+    .seg { height: 6px; flex: 1; border-radius: 3px; background: var(--field-bg); }
+    .seg.on1 { background: var(--weak); }
+    .seg.on2 { background: var(--warn); }
+    .seg.on3 { background: var(--ok); }
+    .seg.on4 { background: var(--ok); }
+    .stext { font-size: 12px; color: var(--dim); margin-left: 8px; white-space: nowrap; }
+
+    .foot {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 6px 14px;
+      font-size: 11px;
+      color: var(--faint);
+      border-top: 1px solid var(--divider);
+      flex-shrink: 0;
+    }
+    .foot .sp { flex: 1; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <span class="title">🔐 密码本</span>
+    <div class="tabs">
+      <button class="tab active" id="tab-vault">密码本</button>
+      <button class="tab" id="tab-gen">生成器</button>
+    </div>
+    <span class="status" id="status">加载中…</span>
+    <button id="lockbtn" hidden>🔒 锁定</button>
+  </div>
+
+  <!-- ============================== 密码本 ============================== -->
+  <div class="view" id="view-vault">
+    <div class="lockbox" id="lockbox">
+      <div class="lockicon">🔒</div>
+      <div class="locktitle" id="locktitle">请输入主密码</div>
+      <input class="master" id="master" type="password" placeholder="主密码" autocomplete="off" />
+      <input class="master" id="master2" type="password" placeholder="再输一次确认" autocomplete="off" hidden />
+      <div class="err" id="lockerr"></div>
+      <button class="primary" id="unlockbtn">解锁</button>
+      <div class="lockhint" id="lockhint">
+        主密码只用于本机解密，不会保存、也不会上传；忘记后无法找回
+      </div>
+    </div>
+
+    <div class="tools" id="tools" hidden>
+      <input class="filter" id="filter" placeholder="过滤名称 / 账号…" autocomplete="off" />
+      <button class="primary" id="newbtn">+ 新建</button>
+    </div>
+    <div class="list" id="list" hidden></div>
+
+    <div class="editor" id="editor" hidden>
+      <div class="field">
+        <label>名称</label>
+        <input id="f-title" placeholder="例如 GitHub" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label>账号</label>
+        <input id="f-user" placeholder="用户名 / 邮箱" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label>密码</label>
+        <div class="pwwrap">
+          <input id="f-pass" class="mono" placeholder="密码" autocomplete="off" />
+          <button id="f-gen" title="生成一个强随机密码">🎲 生成</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>网址</label>
+        <input id="f-url" placeholder="https://…" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label>备注</label>
+        <input id="f-note" placeholder="可选" autocomplete="off" />
+      </div>
+      <div class="editrow">
+        <button class="primary" id="f-save">保存</button>
+        <button id="f-cancel">取消</button>
+        <span class="err" id="f-err"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================== 生成器 ============================== -->
+  <div class="view" id="view-gen" hidden>
+    <div class="gen">
+      <div class="genpw" id="genpw" title="双击复制">—</div>
+      <div class="genrow">
+        <span class="lab">长度</span>
+        <input type="range" id="len" min="4" max="64" step="1" value="20" />
+        <span class="len" id="lenval">20</span>
+      </div>
+      <div class="bar-strength">
+        <div class="seg" id="s1"></div>
+        <div class="seg" id="s2"></div>
+        <div class="seg" id="s3"></div>
+        <div class="seg" id="s4"></div>
+        <span class="stext" id="stext"></span>
+      </div>
+      <div class="opts">
+        <label><input type="checkbox" id="opt-upper" checked />大写 A-Z</label>
+        <label><input type="checkbox" id="opt-lower" checked />小写 a-z</label>
+        <label><input type="checkbox" id="opt-digits" checked />数字 0-9</label>
+        <label><input type="checkbox" id="opt-symbols" checked />符号 !@#$</label>
+        <label><input type="checkbox" id="opt-amb" checked />排除易混 0O1lI</label>
+      </div>
+      <div class="editrow">
+        <button class="primary" id="regen">🎲 重新生成</button>
+        <button id="gencopy">📋 复制</button>
+        <span class="hint" id="genhint"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span id="foothint">双击结果即可复制 · 复制密码 30 秒后自动清空剪贴板</span>
+    <span class="sp"></span>
+    <span id="autolock"></span>
+  </div>
+
+  <!-- 与沙箱 main.js 共用同一份生成实现（CSPRNG，非 Math.random） -->
+  <script src="pwdgen.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const statusEl = $("status");
+    const setStatus = (s) => { statusEl.textContent = s; };
+
+    const CLIP_HINT = "复制密码 30 秒后自动清空剪贴板";
+    let autolockMs = 5 * 60 * 1000;
+    let clipClearMs = 30000;
+    let entries = [];
+    let editingId = null;
+    let revealed = new Set();
+    let filterText = "";
+
+    // ---------------------------------------------------------- host bridge
+    let seq = 0;
+    const pending = new Map();
+
+    function call(type, payload) {
+      const id = ++seq;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          if (pending.has(id)) {
+            pending.delete(id);
+            reject(new Error("插件无响应"));
+          }
+        }, 15000);
+        pending.set(id, {
+          resolve: (v) => { clearTimeout(timer); resolve(v); },
+          reject: (e) => { clearTimeout(timer); reject(e); },
+        });
+        uTools.sendMainMessage(Object.assign({ id, type }, payload || {}));
+      });
+    }
+
+    uTools.onMainMessage((msg) => {
+      if (!msg || typeof msg !== "object") return;
+      if (msg.type === "locked") {
+        onLocked(msg.reason);
+        return;
+      }
+      const p = msg.id != null ? pending.get(msg.id) : null;
+      if (!p) return;
+      pending.delete(msg.id);
+      if (msg.error) p.reject(new Error(msg.error));
+      else p.resolve(msg);
+    });
+
+    function onLocked(reason) {
+      entries = [];
+      revealed = new Set();
+      editingId = null;
+      $("lockbox").hidden = false;
+      $("tools").hidden = true;
+      $("list").hidden = true;
+      $("editor").hidden = true;
+      $("lockbtn").hidden = true;
+      $("master2").hidden = true;
+      $("locktitle").textContent = "已锁定，请重新输入主密码";
+      setStatus(reason === "idle" ? "闲置超时已自动锁定" : "已锁定");
+    }
+
+    // ---------------------------------------------------------------- vault
+    function showVault() {
+      $("lockbox").hidden = true;
+      $("editor").hidden = true;
+      $("tools").hidden = false;
+      $("list").hidden = false;
+      $("lockbtn").hidden = false;
+      revealEntries();
+    }
+
+    function matches(e) {
+      if (!filterText) return true;
+      return `${e.title} ${e.username} ${e.url || ""}`.toLowerCase().includes(filterText);
+    }
+
+    function revealEntries() {
+      const list = $("list");
+      list.replaceChildren();
+      const shown = entries.filter(matches);
+      if (shown.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = entries.length === 0 ? "还没有记录，点右上角「+ 新建」添加" : "没有匹配的记录";
+        list.appendChild(empty);
+      }
+      for (const e of shown) {
+        const row = document.createElement("div");
+        row.className = "entry";
+
+        const main = document.createElement("div");
+        main.className = "e-main";
+        const title = document.createElement("div");
+        title.className = "e-title";
+        title.textContent = e.title;
+        const sub = document.createElement("div");
+        sub.className = "e-sub";
+        sub.textContent = e.username || e.url || "（无账号）";
+        main.append(title, sub);
+
+        const pass = document.createElement("div");
+        pass.className = "e-pass" + (revealed.has(e.id) ? " shown" : "");
+        pass.textContent = revealed.has(e.id) ? e.password || "(空)" : "•".repeat(Math.min(12, Math.max(6, (e.password || "").length)));
+        pass.title = revealed.has(e.id) ? "点击隐藏" : "点击查看";
+        pass.onclick = () => {
+          if (revealed.has(e.id)) revealed.delete(e.id);
+          else revealed.add(e.id);
+          revealEntries();
+        };
+
+        const acts = document.createElement("div");
+        acts.className = "e-actions";
+        const mk = (label, cls, fn) => {
+          const b = document.createElement("button");
+          b.textContent = label;
+          if (cls) b.className = cls;
+          b.onclick = fn;
+          return b;
+        };
+        acts.append(
+          mk("复制密码", "", () => copySensitive(e.password, row, "密码")),
+          mk("复制账号", "", () => copyPlain(e.username, "账号")),
+          mk("编辑", "", () => openEditor(e.id)),
+          mk("删除", "danger", () => removeEntry(e.id, e.title)),
+        );
+
+        row.append(main, pass, acts);
+        list.appendChild(row);
+      }
+      setStatus(`已解锁 · ${entries.length} 条`);
+    }
+
+    async function copySensitive(text, row, label) {
+      if (!text) { setStatus("没有可复制的内容"); return; }
+      try {
+        const r = await call("copy", { text, sensitive: true });
+        const secs = Math.round((r.clearInMs || clipClearMs) / 1000);
+        flashRow(row, `已复制${label}（${secs} 秒后清剪贴板）`);
+      } catch (e) {
+        setStatus("复制失败: " + e.message);
+      }
+    }
+
+    async function copyPlain(text, label) {
+      if (!text) { setStatus("没有可复制的内容"); return; }
+      try {
+        await call("copy", { text, sensitive: false });
+        setStatus(`已复制${label}`);
+      } catch (e) {
+        setStatus("复制失败: " + e.message);
+      }
+    }
+
+    function flashRow(row, text) {
+      setStatus(text);
+      const old = row.style.outline;
+      row.style.outline = "2px solid var(--ok)";
+      setTimeout(() => { row.style.outline = old; }, 900);
+    }
+
+    async function removeEntry(id, title) {
+      try {
+        const r = await call("delete", { id });
+        entries = r.entries || [];
+        revealEntries();
+        setStatus(`已删除「${title}」`);
+      } catch (e) {
+        setStatus("删除失败: " + e.message);
+      }
+    }
+
+    function openEditor(id) {
+      editingId = id || null;
+      const e = id ? entries.find((x) => x.id === id) : null;
+      $("f-title").value = e ? e.title : "";
+      $("f-user").value = e ? e.username : "";
+      $("f-pass").value = e ? e.password : PwdGen.generatePassword({ length: 20 });
+      $("f-url").value = e ? e.url || "" : "";
+      $("f-note").value = e ? e.note || "" : "";
+      $("f-err").textContent = "";
+      $("tools").hidden = true;
+      $("list").hidden = true;
+      $("editor").hidden = false;
+      setStatus(e ? `编辑「${e.title}」` : "新建记录（已预填随机密码）");
+      $("f-title").focus();
+    }
+
+    function closeEditor() {
+      editingId = null;
+      $("editor").hidden = true;
+      $("tools").hidden = false;
+      $("list").hidden = false;
+      revealEntries();
+    }
+
+    async function saveEditor() {
+      const entry = {
+        id: editingId || undefined,
+        title: $("f-title").value,
+        username: $("f-user").value,
+        password: $("f-pass").value,
+        url: $("f-url").value,
+        note: $("f-note").value,
+      };
+      try {
+        const r = await call("save", { entry });
+        entries = r.entries || [];
+        $("f-err").textContent = "";
+        closeEditor();
+        setStatus(`已保存「${entry.title}」`);
+      } catch (e) {
+        $("f-err").textContent = e.message;
+      }
+    }
+
+    async function doUnlock(creating) {
+      const m = $("master").value;
+      $("lockerr").textContent = "";
+      try {
+        const r = await call(creating ? "create" : "unlock", { master: m });
+        entries = r.entries || [];
+        $("master").value = "";
+        $("master2").value = "";
+        showVault();
+      } catch (e) {
+        $("lockerr").textContent = e.message;
+        $("master").select();
+      }
+    }
+
+    // ------------------------------------------------------------ generator
+    function genOpts() {
+      return {
+        length: Number($("len").value),
+        upper: $("opt-upper").checked,
+        lower: $("opt-lower").checked,
+        digits: $("opt-digits").checked,
+        symbols: $("opt-symbols").checked,
+        excludeAmbiguous: $("opt-amb").checked,
+      };
+    }
+
+    function regenerate(pushLength) {
+      if (pushLength) $("len").value = String(Math.max(4, Math.min(64, pushLength)));
+      const opts = genOpts();
+      const pw = PwdGen.generatePassword(opts);
+      const st = PwdGen.strength(pw);
+      $("genpw").textContent = pw;
+      $("genpw").classList.remove("copied");
+      $("lenval").textContent = String(opts.length);
+      $("genhint").textContent = `${String(pw).length} 位 · 约 ${st.bits} 位熵`;
+      for (let i = 1; i <= 4; i++) {
+        $("s" + i).className = "seg" + (i <= st.score ? " on" + st.score : "");
+      }
+      $("stext").textContent = st.label;
+    }
+
+    // ------------------------------------------------------------------ tabs
+    function showTab(name) {
+      $("view-vault").hidden = name !== "vault";
+      $("view-gen").hidden = name !== "gen";
+      $("tab-vault").classList.toggle("active", name === "vault");
+      $("tab-gen").classList.toggle("active", name === "gen");
+      if (name === "gen") regenerate();
+    }
+
+    // ------------------------------------------------------------------ init
+    window.addEventListener("DOMContentLoaded", async () => {
+      // 生成器完全在页面侧（CSPRNG），无需等宿主
+      if (typeof PwdGen !== "object") {
+        setStatus("生成模块加载失败");
+        return;
+      }
+      regenerate();
+
+      let ctx = null;
+      try { ctx = await uTools.getDetailContext(); } catch (_) { /* ignore */ }
+      const item = ctx && ctx.item ? ctx.item : null;
+      const action = item && item.data ? item.data.action : "";
+
+      let st = null;
+      try {
+        st = await call("status");
+      } catch (e) {
+        setStatus("无法访问插件: " + e.message);
+        return;
+      }
+      autolockMs = st.autoLockMs || autolockMs;
+      clipClearMs = st.clipClearMs || clipClearMs;
+      $("autolock").textContent = `无操作 ${Math.round(autolockMs / 60000)} 分钟自动锁定`;
+      $("foothint").textContent = `双击结果即可复制 · 复制密码 ${Math.round(clipClearMs / 1000)} 秒后自动清空剪贴板`;
+
+      if (st.unlocked) {
+        entries = st.entries || [];
+        showVault();
+      } else {
+        const creating = !st.hasVault;
+        $("locktitle").textContent = creating ? "设置主密码（首次使用）" : "请输入主密码";
+        $("unlockbtn").textContent = creating ? "创建密码本" : "解锁";
+        $("master2").hidden = !creating;
+        $("lockhint").textContent = creating
+          ? "主密码只用于本机加密，不会保存、也不会上传；忘记后无法找回"
+          : "连续输错不会泄露任何信息，但请确认键盘大小写与输入法状态";
+        setStatus(creating ? "还没有密码本，请设置主密码" : "已锁定");
+        $("master").focus();
+      }
+
+      if (item && item.data && item.data.filter) {
+        filterText = String(item.data.filter).toLowerCase();
+        $("filter").value = String(item.data.filter);
+      }
+
+      // 从搜索「生成密码 20」进来 -> 直接落在生成器
+      if (action === "generator") {
+        showTab("gen");
+        if (item.data && item.data.length) regenerate(Number(item.data.length));
+      } else if (action === "vault") {
+        showTab("vault");
+        if (st.unlocked) {
+          const eid = item.data && item.data.entryId;
+          if (eid) {
+            revealed.add(eid);
+            revealEntries();
+          }
+        }
+      }
+    });
+
+    // --------------------------------------------------------------- wiring
+    $("tab-vault").onclick = () => showTab("vault");
+    $("tab-gen").onclick = () => showTab("gen");
+    $("unlockbtn").onclick = () => {
+      const creating = !$("master2").hidden;
+      if (creating && $("master").value !== $("master2").value) {
+        $("lockerr").textContent = "两次输入的主密码不一致";
+        return;
+      }
+      void doUnlock(creating);
+    };
+    for (const id of ["master", "master2"]) {
+      $(id).addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.isComposing) {
+          e.preventDefault();
+          $("unlockbtn").click();
+        }
+      });
+    }
+    $("lockbtn").onclick = async () => {
+      try {
+        await call("lock");
+      } catch (_) { /* already locked */ }
+    };
+    $("newbtn").onclick = () => openEditor(null);
+    $("f-cancel").onclick = closeEditor;
+    $("f-save").onclick = () => void saveEditor();
+    $("f-gen").onclick = () => {
+      $("f-pass").value = PwdGen.generatePassword(genOpts());
+      $("f-pass").focus();
+    };
+    $("filter").addEventListener("input", (e) => {
+      filterText = String(e.target.value || "").toLowerCase();
+      revealEntries();
+    });
+    $("len").addEventListener("input", () => regenerate());
+    for (const id of ["opt-upper", "opt-lower", "opt-digits", "opt-symbols", "opt-amb"]) {
+      $(id).addEventListener("change", () => regenerate());
+    }
+    $("regen").onclick = () => regenerate();
+    $("gencopy").onclick = () => void copyGenerated();
+    $("genpw").addEventListener("dblclick", () => void copyGenerated());
+
+    async function copyGenerated() {
+      const pw = $("genpw").textContent;
+      if (!pw || pw === "—") return;
+      try {
+        const r = await call("copy", { text: pw, sensitive: true });
+        const secs = Math.round((r.clearInMs || clipClearMs) / 1000);
+        $("genpw").classList.add("copied");
+        setStatus(`已复制生成密码（${secs} 秒后清剪贴板）`);
+        setTimeout(() => $("genpw").classList.remove("copied"), 900);
+      } catch (e) {
+        setStatus("复制失败: " + e.message);
+      }
+    }
+  </script>
+</body>
+</html>

@@ -61,6 +61,10 @@ interface ActiveDetail {
   value: string;
   item: PluginItem | null;
   ready: boolean; // renderer said the iframe is mounted
+  /** [processId, routingId] of the plugin iframe. `webContents.send` only
+   *  reaches the TOP frame, so replies to a detail page must go through
+   *  sendToFrame() or they are silently lost. */
+  frameId: [number, number] | null;
 }
 
 interface PendingGrant {
@@ -79,6 +83,13 @@ export class PluginManager {
   private lastActive = new Map<string, number>();
   private apiServer: ApiServer;
   private activeDetail: ActiveDetail | null = null;
+  /**
+   * Plugin -> detail-frame messages that arrived before the iframe reported
+   * `ready`. The page's first request is usually sent from its own
+   * DOMContentLoaded, which fires BEFORE the renderer's iframe onLoad —
+   * dropping those replies left the plugin waiting forever.
+   */
+  private detailQueue: { pluginId: string; data: unknown }[] = [];
   private nextRequestId = 1;
   private pendingGrants = new Map<number, PendingGrant>();
   private reapTimer: NodeJS.Timeout | null = null;
@@ -264,7 +275,9 @@ export class PluginManager {
         value,
         item: pluginItem,
         ready: false,
+        frameId: null,
       };
+      this.detailQueue = [];
       // Best-effort warm start so main.js state is ready when the view opens.
       void this.ensureLoaded(m).catch(() => {});
       return {
@@ -295,14 +308,41 @@ export class PluginManager {
     };
   }
 
-  markDetailReady(): void {
-    if (this.activeDetail) this.activeDetail.ready = true;
+  markDetailReady(frameId?: [number, number] | null): void {
+    const d = this.activeDetail;
+    if (!d) return;
+    if (frameId) d.frameId = frameId;
+    d.ready = true;
+    // Deliver whatever the plugin already answered while the frame mounted.
+    const queued = this.detailQueue;
+    this.detailQueue = [];
+    for (const msg of queued) {
+      this.forwardDetailMessage(msg.pluginId, msg.data);
+    }
+  }
+
+  /** Target the plugin iframe explicitly; fall back to the top frame. */
+  private forwardDetailMessage(pluginId: string, data: unknown): void {
+    const wc = this.getWin()?.webContents;
+    if (!wc) return;
+    const payload = { pluginId, data: data ?? null };
+    const frameId = this.activeDetail?.frameId;
+    if (frameId) {
+      try {
+        wc.sendToFrame(frameId, Ipc.EvtDetailMessage, payload);
+      } catch {
+        // frame navigated away mid-send: nothing to deliver to
+      }
+    } else {
+      wc.send(Ipc.EvtDetailMessage, payload);
+    }
   }
 
   /** Detail frame -> plugin main.js message. */
-  detailSend(data: unknown): void {
+  detailSend(data: unknown, frameId?: [number, number] | null): void {
     const d = this.activeDetail;
     if (!d) return;
+    if (frameId) d.frameId = frameId; // remember where to send the reply
     this.sandboxes.get(d.pluginId)?.post("mainMessage", { data });
   }
 
@@ -310,6 +350,7 @@ export class PluginManager {
   closeDetail(fireExit: boolean): void {
     const d = this.activeDetail;
     this.activeDetail = null;
+    this.detailQueue = []; // never leak a previous page's messages into the next
     if (!d) return;
     const sb = this.sandboxes.get(d.pluginId);
     if (sb && fireExit) {
@@ -424,13 +465,15 @@ export class PluginManager {
         console.log(`[plugin:${pluginId}]`, String(evt.params.msg ?? ""));
         break;
       case "mainMessage": {
-        // Forward to the detail view only when it's for this plugin and mounted.
+        // Forward to the detail view only when it belongs to this plugin.
+        // Messages racing ahead of the iframe's onLoad are QUEUED, never
+        // dropped (see detailQueue).
         const d = this.activeDetail;
-        if (d && d.pluginId === pluginId && d.ready) {
-          this.getWin()?.webContents.send(Ipc.EvtDetailMessage, {
-            pluginId,
-            data: evt.params.data ?? null,
-          });
+        if (!d || d.pluginId !== pluginId) break;
+        if (d.ready) {
+          this.forwardDetailMessage(pluginId, evt.params.data);
+        } else if (this.detailQueue.length < 100) {
+          this.detailQueue.push({ pluginId, data: evt.params.data });
         }
         break;
       }

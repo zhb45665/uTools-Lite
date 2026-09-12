@@ -18,6 +18,21 @@ import { shell } from "electron";
 import { PluginManager } from "./plugins/manager";
 
 /**
+ * Frame identity of the IPC sender.
+ *
+ * Plugin detail views live in a `plugin://` IFRAME, and webContents.send()
+ * only reaches the top frame — messages to a detail page must be addressed
+ * with webContents.sendToFrame([processId, routingId], ...) or the plugin
+ * never hears back from the host.
+ */
+function frameIdOf(e: {
+  senderFrame?: { processId: number; routingId: number } | null;
+}): [number, number] | null {
+  const f = e && e.senderFrame;
+  return f ? [f.processId, f.routingId] : null;
+}
+
+/**
  * Wire up all ipcMain handlers the renderer talks to via the preload bridge.
  */
 export function registerIpc(
@@ -150,8 +165,8 @@ export function registerIpc(
     return pm.handleSelect(item ?? ({} as SearchItem));
   });
 
-  ipcMain.handle(Ipc.PluginDetailReady, () => {
-    pm.markDetailReady();
+  ipcMain.handle(Ipc.PluginDetailReady, (e) => {
+    pm.markDetailReady(frameIdOf(e));
     return { ok: true };
   });
 
@@ -160,8 +175,8 @@ export function registerIpc(
     return { ok: true };
   });
 
-  ipcMain.handle(Ipc.PluginDetailSend, (_e, data: unknown) => {
-    pm.detailSend(data);
+  ipcMain.handle(Ipc.PluginDetailSend, (e, data: unknown) => {
+    pm.detailSend(data, frameIdOf(e));
     return { ok: true };
   });
 

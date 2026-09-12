@@ -266,6 +266,16 @@ export class PluginSandbox {
         this.onceReady = null;
       }
       this.cb.onEvent({ method: msg.method, params: msg.params ?? {} });
+    } else if (msg.t === "req") {
+      // Plugin -> host capability request (fs / clipboard / net / data.dir).
+      // This branch is what makes main.readFile/writeFile/copyText/... work at
+      // all: without it every capability call from a sandbox hung until its
+      // own timeout and then failed.
+      void this.dispatchRequest({
+        id: msg.id,
+        method: msg.method,
+        params: msg.params,
+      });
     }
   }
 

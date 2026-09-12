@@ -52,7 +52,7 @@ app.whenReady().then(async () => {
     // Self-heal: a previous run may have left its throwaway plugin behind
     // (Windows keeps the dir locked while a sandbox holds it as cwd), and
     // discovery below would then report an unexpected plugin.
-    for (const stale of ["cmdplug", "badplug"]) {
+    for (const stale of ["cmdplug", "capplug", "badplug"]) {
       try {
         fs.rmSync(path.join(pm.userPluginsRoot(), stale), {
           recursive: true,
@@ -67,13 +67,15 @@ app.whenReady().then(async () => {
     // --- discovery
     const list = pm.list();
     check(
-      "discover 3 builtin plugins",
-      list.length === 3,
+      "discover 4 builtin plugins",
+      list.length === 4,
       list.map((p) => p.id),
     );
     check(
       "plugin ids",
-      list.every((p) => ["notes", "calc-paper", "amount"].includes(p.id)),
+      list.every((p) =>
+        ["notes", "calc-paper", "amount", "password"].includes(p.id),
+      ),
       list.map((p) => p.id),
     );
     const notes = list.find((p) => p.id === "notes");
@@ -142,6 +144,71 @@ app.whenReady().then(async () => {
       conv.formatCurrency("1234.5") === "¥1,234.50" &&
         conv.formatCurrency("-1234.5") === "-¥1,234.50",
       [conv.formatCurrency("1234.5"), conv.formatCurrency("-1234.5")],
+    );
+
+    // --- 密码本：加密保险库 + 随机密码生成
+    const pwVault = require("./plugins/password/vault.js");
+    const pwGen = require("./plugins/password/pwdgen.js");
+    const pwList = list.find((p) => p.id === "password");
+    check(
+      "password declares fs+clipboard",
+      JSON.stringify(pwList.permissions) === JSON.stringify(["fs", "clipboard"]),
+      pwList.permissions,
+    );
+
+    const secretBlob = pwVault.encryptVault("主密码-123", {
+      entries: [
+        { id: "1", title: "GitHub", username: "me@x.com", password: "S3cret!中文" },
+      ],
+    });
+    const roundTrip = pwVault.decryptVault("主密码-123", secretBlob);
+    check(
+      "保险库加解密往返一致（含中文/符号）",
+      roundTrip.entries[0].password === "S3cret!中文",
+      roundTrip,
+    );
+    let wrongPwRejected = false;
+    try {
+      pwVault.decryptVault("错误密码", secretBlob);
+    } catch {
+      wrongPwRejected = true;
+    }
+    check("错误主密码被拒绝（GCM 认证失败）", wrongPwRejected);
+    const blobText = JSON.stringify(secretBlob);
+    check(
+      "磁盘内容不含任何明文",
+      !blobText.includes("S3cret") &&
+        !blobText.includes("中文") &&
+        !blobText.includes("GitHub") &&
+        !blobText.includes("me@x.com"),
+      Object.keys(secretBlob),
+    );
+
+    const genPw = pwGen.generatePassword({ length: 24 });
+    check(
+      "生成密码 24 位且四类字符齐全",
+      genPw.length === 24 &&
+        /[A-Z]/.test(genPw) &&
+        /[a-z]/.test(genPw) &&
+        /[0-9]/.test(genPw) &&
+        /[^A-Za-z0-9]/.test(genPw),
+      genPw,
+    );
+    check(
+      "默认排除易混字符（0O1lI 等）",
+      ![...genPw].some((c) => pwGen.AMBIGUOUS.includes(c)),
+      genPw,
+    );
+    const uniqPw = new Set();
+    for (let i = 0; i < 50; i++) uniqPw.add(pwGen.generatePassword({ length: 12 }));
+    check("50 次生成无重复", uniqPw.size === 50, uniqPw.size);
+    const genSrc = fs
+      .readFileSync("./plugins/password/pwdgen.js", "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+    check(
+      "生成器只用密码学随机源（无 Math.random）",
+      !/Math\.random/.test(genSrc) && /randomInt|getRandomValues/.test(genSrc),
     );
 
     // --- pure path validation (no traversal)
@@ -237,6 +304,27 @@ app.whenReady().then(async () => {
       "纯整数 2024 不触发金额（不抢文件/应用搜索）",
       !rsPlainInt.commands.some((c) => c.pluginId === "amount"),
       rsPlainInt.commands.map((c) => c.title),
+    );
+
+    // --- 密码本：关键词 + 生成密码 + 未解锁不泄露
+    const pwItems = await pm.searchPlugins("密码");
+    check(
+      "input: '密码' -> 打开密码本 + 生成随机密码",
+      pwItems.length === 2 && /打开密码本/.test(pwItems[0].title),
+      pwItems.map((i) => i.title),
+    );
+    const genItems = await pm.searchPlugins("生成密码 16");
+    check(
+      "inputSearch: '生成密码 16' -> 恰 16 位随机密码",
+      genItems.length === 1 &&
+        String(genItems[0].title).replace(/^🔑 /, "").length === 16,
+      genItems.map((i) => i.title),
+    );
+    const lockedSearch = await pm.searchPlugins("密码 github");
+    check(
+      "未解锁时搜索记录只提示解锁（不泄露内容）",
+      lockedSearch.length === 1 && /未解锁/.test(lockedSearch[0].title),
+      lockedSearch.map((i) => i.title),
     );
 
     // --- no keyword hit
@@ -337,11 +425,46 @@ app.whenReady().then(async () => {
     pm.rescan();
     check("rescan removes uninstalled plugin", !pm.get("badplug"));
 
+    // --- sandbox -> host capability channel (main.readFile/writeFile/...)
+    //     Regression guard: the "req" branch was missing from the sandbox
+    //     message handler, so EVERY capability call from a plugin hung until
+    //     its own timeout and then failed (silent in practice).
+    const capDir = path.join(pm.userPluginsRoot(), "capplug");
+    fs.mkdirSync(capDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(capDir, "uTLS.json"),
+      JSON.stringify({
+        id: "capplug",
+        name: "Cap Plug",
+        main: "main.js",
+        keywords: ["capplug"],
+        permissions: ["fs"],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(capDir, "main.js"),
+      'main.onInput("capplug", async (k, cb) => {\n' +
+        '  let out = "";\n' +
+        '  try {\n' +
+        '    await main.writeFile("cap-probe.txt", "cap-ok-中文");\n' +
+        '    const back = await main.readFile("cap-probe.txt");\n' +
+        '    out = back + "|" + (await main.getDataDir());\n' +
+        '  } catch (e) { out = "ERR:" + e.message; }\n' +
+        '  cb([{ text: out, icon: "🧪", data: {} }]);\n' +
+        '});\n',
+    );
+    pm.rescan();
+    const capItems = await pm.searchPlugins("capplug");
+    check(
+      "沙箱 -> 宿主能力调用可用（fs 写读往返）",
+      capItems.length === 1 && /cap-ok-中文\|/.test(capItems[0].title),
+      capItems.map((i) => i.title),
+    );
+
     // --- pure-command plugin (no detail view): select runs it + toasts.
     //     Coverage kept via a throwaway user plugin now that the builtin
     //     hello demo plugin is gone.
-    const cmdDir = path.join(pm.userPluginsRoot(), "cmdplug");
-    fs.mkdirSync(cmdDir, { recursive: true });
+    const cmdDir = path.join(pm.userPluginsRoot(), "cmdplug");    fs.mkdirSync(cmdDir, { recursive: true });
     fs.writeFileSync(
       path.join(cmdDir, "uTLS.json"),
       JSON.stringify({
@@ -375,19 +498,24 @@ app.whenReady().then(async () => {
     // Kill the sandboxes FIRST: on Windows a live utilityProcess holds its
     // cwd, so the temp plugin dir stays locked (EBUSY) while the child runs.
     pm.shutdown();
-    for (let i = 0; ; i++) {
-      try {
-        fs.rmSync(cmdDir, { recursive: true, force: true });
-        break;
-      } catch (e) {
-        if (i >= 9 || e.code !== "EBUSY") throw e;
-        const end = Date.now() + 200;
-        while (Date.now() < end) {
-          /* spin */
+    for (const dir of [cmdDir, capDir]) {
+      for (let i = 0; ; i++) {
+        try {
+          fs.rmSync(dir, { recursive: true, force: true });
+          break;
+        } catch (e) {
+          if (i >= 9 || e.code !== "EBUSY") throw e;
+          const end = Date.now() + 200;
+          while (Date.now() < end) {
+            /* spin */
+          }
         }
       }
     }
-    check("清理临时命令插件目录", !fs.existsSync(cmdDir));
+    check(
+      "清理临时插件目录",
+      !fs.existsSync(cmdDir) && !fs.existsSync(capDir),
+    );
   } catch (e) {
     failures++;
     console.log("FAIL  unhandled smoke error —", e && e.stack ? e.stack : e);
