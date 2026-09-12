@@ -1,0 +1,11 @@
+{
+  "id": "unit",
+  "name": "单位换算",
+  "description": "长度 / 重量 / 温度换算（详情视图 + 消息桥 + net 权限示例）",
+  "version": "1.0.0",
+  "main": "main.js",
+  "detail": "detail.html",
+  "keywords": ["unit", "换算", "convert"],
+  "icon": "📐",
+  "permissions": ["net", "clipboard"]
+}

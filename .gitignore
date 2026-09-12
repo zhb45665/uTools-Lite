@@ -1,0 +1,12 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+release/
+build/*.png
+
+# logs & OS noise
+*.log
+.DS_Store
+Thumbs.db

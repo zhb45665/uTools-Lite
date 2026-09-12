@@ -1,0 +1,490 @@
+/* Theme system: light palette is the default, dark palette overrides via
+   prefers-color-scheme. Electron runs with themeSource=system on Windows,
+   so Chromium tracks the OS light/dark setting and these variables switch
+   live when the user changes the Windows theme. */
+
+:root {
+  --panel-bg: rgba(252, 252, 253, 0.97);
+  --panel-border: rgba(0, 0, 0, 0.1);
+  --panel-shadow: 0 24px 70px rgba(0, 0, 0, 0.22);
+  --text: #1c1c1e;
+  --text-strong: #000000;
+  --text-dim: rgba(0, 0, 0, 0.5);
+  --text-faint: rgba(0, 0, 0, 0.35);
+  --input-text: #111113;
+  --placeholder: rgba(0, 0, 0, 0.35);
+  --divider: rgba(0, 0, 0, 0.08);
+  --hover: rgba(0, 0, 0, 0.05);
+  --hover-strong: rgba(0, 0, 0, 0.09);
+  --selected: rgba(52, 101, 242, 0.16);
+  --detail-bg: #f7f7f9;
+  --success: #1a7f37;
+  --success-bg: rgba(47, 120, 60, 0.1);
+  --toast-bg: rgba(47, 107, 61, 0.95);
+  --toast-fg: #ffffff;
+  --perm-bg: rgba(252, 248, 240, 0.98);
+  --perm-border: rgba(196, 130, 40, 0.45);
+  --perm-target: #9a5b00;
+  --accent: #2f5fd0;
+  --accent-fg: #ffffff;
+  --hover-accent: rgba(52, 101, 242, 0.12);
+  --err: #c62828;
+  --chip-bg: rgba(0, 0, 0, 0.06);
+  --btn-border: rgba(0, 0, 0, 0.15);
+  --danger-hover: rgba(200, 60, 60, 0.18);
+  --danger-fg: #8a1f1f;
+  --accent-soft-bg: rgba(52, 101, 242, 0.1);
+  --accent-soft-bg-hover: rgba(52, 101, 242, 0.18);
+  --accent-soft-border: rgba(52, 101, 242, 0.25);
+  --accent-soft-fg: #274ea6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --panel-bg: rgba(26, 26, 30, 0.97);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --panel-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+    --text: #e8e8ea;
+    --text-strong: #ffffff;
+    --text-dim: rgba(255, 255, 255, 0.45);
+    --text-faint: rgba(255, 255, 255, 0.3);
+    --input-text: #f2f2f4;
+    --placeholder: rgba(255, 255, 255, 0.35);
+    --divider: rgba(255, 255, 255, 0.06);
+    --hover: rgba(255, 255, 255, 0.08);
+    --hover-strong: rgba(255, 255, 255, 0.16);
+    --selected: rgba(80, 120, 255, 0.24);
+    --detail-bg: #1a1a1e;
+    --success: #7ee787;
+    --success-bg: rgba(60, 120, 60, 0.15);
+    --toast-bg: rgba(48, 108, 61, 0.92);
+    --toast-fg: #eaffea;
+    --perm-bg: rgba(38, 34, 30, 0.98);
+    --perm-border: rgba(255, 180, 80, 0.35);
+    --perm-target: #ffd9a0;
+    --accent: #3f6ad8;
+    --accent-fg: #ffffff;
+    --hover-accent: rgba(80, 120, 255, 0.15);
+    --err: #ff9d9d;
+    --chip-bg: rgba(255, 255, 255, 0.08);
+    --btn-border: rgba(255, 255, 255, 0.15);
+    --danger-hover: rgba(200, 60, 60, 0.35);
+    --danger-fg: #ffd7d7;
+    --accent-soft-bg: rgba(80, 120, 255, 0.18);
+    --accent-soft-bg-hover: rgba(80, 120, 255, 0.3);
+    --accent-soft-border: rgba(80, 120, 255, 0.3);
+    --accent-soft-fg: #b9ccff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: transparent;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  color: var(--text);
+  user-select: none;
+  overflow: hidden;
+}
+
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-bg);
+  border-radius: 14px;
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--panel-shadow);
+  overflow: hidden;
+}
+
+.searchbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.searchbar-icon {
+  font-size: 20px;
+  opacity: 0.8;
+}
+
+.search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--input-text);
+  font-size: 18px;
+}
+
+.search-input::placeholder {
+  color: var(--placeholder);
+}
+
+.spinner {
+  opacity: 0.6;
+  font-size: 14px;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.2;
+  }
+}
+
+.results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.result {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: default;
+}
+
+.result.selected {
+  background: var(--selected);
+}
+
+.result-icon {
+  font-size: 20px;
+  width: 26px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.result-icon-img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.result-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.result-title {
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.result-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.result-type {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-faint);
+}
+
+.hint {
+  padding: 20px;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.hint .meta {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.copied-toast {
+  position: sticky;
+  top: 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--success);
+  padding: 4px;
+  background: var(--success-bg);
+}
+
+/* ---------------------------------------------------------- detail view */
+.detailbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.detailbar-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.detailbar-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.detailbar-close:hover {
+  background: var(--hover);
+  color: var(--text-strong);
+}
+
+.detail-frame {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: var(--detail-bg);
+}
+
+/* ---------------------------------------------------------------- toast */
+.toast {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--toast-bg);
+  color: var(--toast-fg);
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  z-index: 50;
+  max-width: 80%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------ permission card */
+.perm-card {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(460px, 92%);
+  background: var(--perm-bg);
+  border: 1px solid var(--perm-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  z-index: 60;
+}
+
+.perm-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+
+.perm-target {
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  color: var(--perm-target);
+  word-break: break-all;
+  margin-bottom: 4px;
+}
+
+.perm-purpose {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+.perm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.perm-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.perm-btn.deny {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.perm-btn.allow {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* -------------------------------------------------------- plugin list */
+.plugin-list {
+  margin-top: 14px;
+  border-top: 1px solid var(--panel-border);
+  padding-top: 10px;
+}
+
+.plugin-list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.plugin-manage-btn {
+  background: transparent;
+  border: 1px solid var(--btn-border);
+  color: var(--text-dim);
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.plugin-manage-btn:hover {
+  background: var(--hover);
+}
+
+.plugin-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.plugin-row:hover {
+  background: var(--hover-accent);
+}
+
+.plugin-row.error .plugin-name {
+  color: var(--err);
+}
+
+.plugin-icon {
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.plugin-name {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+  color: var(--text);
+}
+
+.plugin-err {
+  font-size: 11px;
+  color: var(--err);
+  margin-left: 4px;
+}
+
+.plugin-kws {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.plugin-kw {
+  font-size: 11px;
+  background: var(--chip-bg);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--text-dim);
+  font-family: Consolas, monospace;
+}
+
+.plugin-actions {
+  display: none;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.plugin-row:hover .plugin-actions {
+  display: inline-flex;
+}
+
+.plugin-action {
+  background: var(--chip-bg);
+  border: none;
+  color: var(--text-dim);
+  border-radius: 5px;
+  font-size: 11px;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+
+.plugin-action:hover {
+  background: var(--hover-strong);
+}
+
+.plugin-action.danger:hover {
+  background: var(--danger-hover);
+  color: var(--danger-fg);
+}
+
+.plugin-manage-bar {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.plugin-manage-bar button {
+  background: var(--accent-soft-bg);
+  border: 1px solid var(--accent-soft-border);
+  color: var(--accent-soft-fg);
+  border-radius: 8px;
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.plugin-manage-bar button:hover {
+  background: var(--accent-soft-bg-hover);
+}

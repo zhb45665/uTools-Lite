@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>随手笔记</title>
+  <style>
+    /* Theme follows the OS (Electron themeSource=system). */
+    :root {
+      --bg: #f7f7f9;
+      --text: #1c1c1e;
+      --dim: rgba(0, 0, 0, 0.4);
+      --faint: rgba(0, 0, 0, 0.3);
+      --divider: rgba(0, 0, 0, 0.08);
+      --input-text: #111113;
+      --btn-soft: rgba(0, 0, 0, 0.06);
+      --accent: #2f5fd0;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1a1a1e;
+        --text: #e8e8ea;
+        --dim: rgba(255, 255, 255, 0.4);
+        --faint: rgba(255, 255, 255, 0.3);
+        --divider: rgba(255, 255, 255, 0.08);
+        --input-text: #f2f2f4;
+        --btn-soft: rgba(255, 255, 255, 0.1);
+        --accent: #3f6ad8;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px "Segoe UI", system-ui, sans-serif;
+    }
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--divider);
+    }
+    .bar .title { font-weight: 600; }
+    .bar .status { flex: 1; font-size: 12px; color: var(--dim); }
+    button {
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      border-radius: 7px;
+      padding: 6px 14px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    button.secondary { background: var(--btn-soft); color: var(--text); }
+    button:disabled { opacity: 0.5; cursor: default; }
+    textarea {
+      flex: 1;
+      resize: none;
+      border: none;
+      outline: none;
+      background: transparent;
+      color: var(--input-text);
+      padding: 14px;
+      font: 14px/1.6 Consolas, "Courier New", monospace;
+    }
+    .foot {
+      padding: 6px 14px;
+      font-size: 11px;
+      color: var(--faint);
+      border-top: 1px solid var(--divider);
+    }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <span class="title">📝 随手笔记</span>
+    <span class="status" id="status">加载中…</span>
+    <button class="secondary" id="append">追加一行</button>
+    <button id="save">保存</button>
+  </div>
+  <textarea id="ta" placeholder="随手记一笔… (Ctrl+S 保存)"></textarea>
+  <div class="foot">
+    数据存储于插件私有目录 plugin-data/notes/note.txt（无需目录授权）· Esc 关闭
+  </div>
+  <script>
+    const ta = document.getElementById("ta");
+    const status = document.getElementById("status");
+
+    function setStatus(s) { status.textContent = s; }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      // 1. 拿到详情视图上下文（关键词 / 选中的结果项）
+      const ctx = await uTools.getDetailContext();
+      setStatus(ctx ? `关键词「${ctx.keyword}」` : "无上下文");
+
+      // 2. 读私有数据目录里已有的笔记（相对路径 -> 免授权）
+      try {
+        const old = await uTools.readFile("note.txt");
+        ta.value = old;
+      } catch (_) { /* 首次使用没有文件 */ }
+
+      // 3. 如果是 "note xxx" 进入的，把 xxx 追加为第一行
+      if (ctx && ctx.item && ctx.item.data && ctx.item.data.action === "new" && ctx.item.data.value) {
+        ta.value = (ta.value ? ta.value + "\n" : "") + ctx.item.data.value;
+      }
+
+      // 4. 订阅 main.js 发来的消息（宿主中转）
+      uTools.onMainMessage((msg) => {
+        if (!msg || typeof msg !== "object") return;
+        if (msg.type === "saved") setStatus("已保存 " + new Date(msg.at).toLocaleTimeString());
+        else if (msg.type === "appended") setStatus("已追加 " + new Date(msg.at).toLocaleTimeString());
+        else if (msg.type === "save-error") setStatus("保存失败: " + msg.error);
+      });
+    });
+
+    document.getElementById("save").onclick = () => {
+      uTools.sendMainMessage({ type: "save", content: ta.value });
+    };
+
+    document.getElementById("append").onclick = () => {
+      const line = "[备注] " + new Date().toLocaleString() + " — 来自详情视图消息桥";
+      uTools.sendMainMessage({ type: "append", content: (ta.value ? ta.value + "\n" : "") + line });
+      // main.js 落盘后会回发 appended，这里同时更新本地视图
+      ta.value = (ta.value ? ta.value + "\n" : "") + line;
+    };
+
+    ta.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        uTools.sendMainMessage({ type: "save", content: ta.value });
+      }
+    });
+  </script>
+</body>
+</html>

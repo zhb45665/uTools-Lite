@@ -1,0 +1,24 @@
+appId: com.example.utools-lite
+productName: uTools Lite
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - plugin-host/**
+  - plugins/**
+  # Tray icon is loaded at runtime from inside the asar (src/main/index.ts);
+  # without this entry the packaged app finds an empty image and the
+  # Windows Tray constructor throws, crashing startup.
+  - build/tray-icon.png
+  - package.json
+asarUnpack:
+  - plugin-host/**
+win:
+  target:
+    - nsis
+  icon: build/icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always

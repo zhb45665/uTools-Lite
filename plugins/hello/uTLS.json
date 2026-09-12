@@ -1,0 +1,10 @@
+{
+  "id": "hello",
+  "name": "Hello 示例",
+  "description": "最简纯命令插件：体验关键词命中与 onSelect",
+  "version": "1.0.0",
+  "main": "main.js",
+  "keywords": ["hello", "嗨", "hi"],
+  "icon": "👋",
+  "permissions": []
+}

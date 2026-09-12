@@ -1,0 +1,36 @@
+{
+  "name": "utools-lite",
+  "version": "0.1.0",
+  "description": "uTools-style Windows launcher (P1: hotkey window + file/app search + calculator)",
+  "main": "dist/main/index.js",
+  "author": "you",
+  "license": "MIT",
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "icon": "node build/make-icon.js",
+    "build:node": "tsc -p tsconfig.node.json",
+    "build:renderer": "vite build",
+    "build": "npm run clean && npm run icon && npm run build:node && npm run build:renderer",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electron .",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.json --noEmit",
+    "smoke": "npm run build && electron smoke-plugins-main.js",
+    "dist": "npm run build && node scripts/dist.mjs"
+  },
+  "dependencies": {
+    "fuzzaldrin-plus": "^0.6.0"
+  },
+  "devDependencies": {
+    "@types/fuzzaldrin-plus": "^0.6.5",
+    "@types/node": "^22.9.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}

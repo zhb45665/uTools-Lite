@@ -1,0 +1,11 @@
+{
+  "id": "notes",
+  "name": "随手笔记",
+  "description": "快捷键呼出，随手记一笔（详情视图 + fs 权限示例）",
+  "version": "1.0.0",
+  "main": "main.js",
+  "detail": "detail.html",
+  "keywords": ["note", "笔记", "memo"],
+  "icon": "📝",
+  "permissions": ["fs", "clipboard"]
+}
