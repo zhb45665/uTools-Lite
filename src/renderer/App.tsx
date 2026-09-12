@@ -448,7 +448,12 @@ export default function App() {
                         <button
                           className="plugin-action"
                           onClick={() =>
-                            void window.launcher.revealPlugin(p.id)
+                            void window.launcher
+                              .revealPlugin(p.id)
+                              .then((r) => {
+                                if (r.note) showToast(r.note);
+                                else if (r.error) showToast(r.error);
+                              })
                           }
                         >
                           目录

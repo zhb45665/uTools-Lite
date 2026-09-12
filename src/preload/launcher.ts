@@ -98,9 +98,13 @@ const launcherApi = {
   rescanPlugins(): Promise<PluginInfo[]> {
     return ipcRenderer.invoke(Ipc.PluginRescan) as Promise<PluginInfo[]>;
   },
-  revealPlugin(pluginId: string): Promise<{ ok: boolean }> {
+  revealPlugin(
+    pluginId: string,
+  ): Promise<{ ok: boolean; error?: string; note?: string }> {
     return ipcRenderer.invoke(Ipc.PluginReveal, pluginId) as Promise<{
       ok: boolean;
+      error?: string;
+      note?: string;
     }>;
   },
   selectPlugin(item: SearchItem): Promise<PluginSelectResult> {

@@ -84,6 +84,12 @@ app.whenReady().then(async () => {
       amount.permissions,
     );
     check("amount plugin ships detail view", amount.hasDetail === true, amount);
+    const revMissing = pm.reveal("no-such-plugin");
+    check(
+      "reveal 未知插件 -> 返回错误而非静默",
+      revMissing.ok === false && /不存在/.test(revMissing.error || ""),
+      revMissing,
+    );
 
     // --- 金额大写转换算法（官方票据例子 + 边界 + 非法输入）
     const conv = require("./plugins/amount/convert.js");

@@ -602,13 +602,35 @@ export class PluginManager {
     return { ok: true };
   }
 
-  reveal(pluginId: string): void {
+  /**
+   * Show a plugin folder in Explorer.
+   *
+   * Builtin plugins live INSIDE app.asar in packaged builds: Electron's fs
+   * patch makes such a path look like it exists, but Explorer cannot open a
+   * virtual path and Windows answers with "找不到路径". In that case we
+   * reveal app.asar itself and explain what happened.
+   */
+  reveal(pluginId: string): { ok: boolean; error?: string; note?: string } {
     const dir = this.dirOf(pluginId);
-    if (!dir) return;
+    if (!dir) return { ok: false, error: "插件不存在" };
+    if (isInsideAsar(dir)) {
+      const asar = path.join(process.resourcesPath, "app.asar");
+      if (fs.existsSync(asar)) shell.showItemInFolder(asar);
+      return {
+        ok: true,
+        note: "内置插件打包在 app.asar 内，已定位到该文件（同名用户插件可覆盖内置）",
+      };
+    }
     const manifestFile = path.join(dir, "uTLS.json");
     if (fs.existsSync(manifestFile)) shell.showItemInFolder(manifestFile);
     else shell.openPath(dir);
+    return { ok: true };
   }
+}
+
+/** True when a path lives inside an .asar archive (virtual, not a real dir). */
+function isInsideAsar(p: string): boolean {
+  return p.split(path.sep).some((seg) => seg.endsWith(".asar"));
 }
 
 // ---------------------------------------------------------------- module

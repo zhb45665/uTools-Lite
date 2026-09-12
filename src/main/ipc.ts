@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { ipcMain, app, clipboard, dialog } from "electron";
 import { Ipc, SearchItem, CapabilityCall } from "../shared/ipc";
 import { SettingsStore } from "./store";
@@ -39,8 +41,28 @@ export function registerIpc(
           return { ok: true, copied: payload };
         }
         // file / app -> open via shell (apps are .lnk; opening executes them).
+        // Guard first: a stale search hit (file moved/deleted, app .lnk whose
+        // target is gone) would otherwise surface a raw Windows message such
+        // as "找不到路径".
+        if (!fs.existsSync(payload)) {
+          const label = item.type === "app" ? "应用" : "文件";
+          return {
+            ok: false,
+            error: `找不到${label}（可能已被移动或删除）：${payload}`,
+          };
+        }
         const err = await shell.openPath(payload);
-        if (err) return { ok: false, error: err };
+        if (err) {
+          // A shortcut can exist while its target is gone (uninstalled app);
+          // Windows then answers "找不到路径" — explain it in plain Chinese.
+          return {
+            ok: false,
+            error:
+              item.type === "app"
+                ? `应用启动失败：${path.basename(payload)}（快捷方式可能已失效，目标程序已卸载或移动）`
+                : err,
+          };
+        }
         hideLauncher();
         return { ok: true };
       } catch (e) {
@@ -120,10 +142,9 @@ export function registerIpc(
     return pm.rescan();
   });
 
-  ipcMain.handle(Ipc.PluginReveal, (_e, pluginId: string) => {
-    pm.reveal(String(pluginId ?? ""));
-    return { ok: true };
-  });
+  ipcMain.handle(Ipc.PluginReveal, (_e, pluginId: string) =>
+    pm.reveal(String(pluginId ?? "")),
+  );
 
   ipcMain.handle(Ipc.PluginSelect, async (_e, item: SearchItem) => {
     return pm.handleSelect(item ?? ({} as SearchItem));
