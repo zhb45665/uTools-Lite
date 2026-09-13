@@ -4,6 +4,10 @@ node_modules/
 # build output
 dist/
 release/
+!release/
+release/*
+!release/uTools Lite Setup 0.1.2.exe
+!release/uTools Lite Setup 0.1.2.exe.blockmap
 build/*.png
 !build/icon.png
 

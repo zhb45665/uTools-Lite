@@ -20,7 +20,7 @@
 
 本项目目前支持 Windows x64。
 
-1. 在仓库的 [Releases](../../releases) 页面下载最新的 `uTools Lite Setup x.x.x.exe`。
+1. 下载仓库内的 [uTools Lite 0.1.2 安装包](release/uTools%20Lite%20Setup%200.1.2.exe)。
 2. 退出正在运行的旧版本，包括系统托盘中的 uTools Lite。
 3. 运行安装程序完成安装。
 4. 首次启动会显示主窗口，之后可用 `Alt + Space` 随时唤起。
