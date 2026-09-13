@@ -1,5 +1,5 @@
 // Minimal PNG encoder to generate app/tray icons without external deps.
-// Produces a rounded-square "uTools-lite" style glyph (blue rounded square).
+// Produces a simple quick-launch glyph: one bold bolt.
 // Outputs: icon.png (256x256, exe/taskbar) and tray-icon.png (32x32, system tray).
 const fs = require("fs");
 const zlib = require("zlib");
@@ -95,48 +95,27 @@ function renderIcon(S) {
     return true;
   }
 
-  // Simple "u" glyph: two vertical bars joined by a bottom arc.
+  // A single bold quick-action bolt. Broad geometry stays crisp at 16px.
   function inGlyph(x, y) {
-    const gw = S * 0.42; // glyph width
-    const gh = S * 0.5; // glyph height
-    const left = cx - gw / 2;
-    const top = cy - gh / 2 + S * 0.04;
-    const bar = S * 0.09; // bar thickness
-    const bottom = top + gh;
-    // left bar
-    if (x >= left && x <= left + bar && y >= top && y <= bottom) return true;
-    // right bar
-    if (x >= left + gw - bar && x <= left + gw && y >= top && y <= bottom)
-      return true;
-    // bottom arc (U curve)
-    const arcCx = cx;
-    const arcCy = bottom - gh * 0.0; // center near bottom
-    const outerR = gw / 2;
-    const innerR = gw / 2 - bar;
-    const dx = x - arcCx;
-    const dy = y - (bottom - bar / 2);
-    const d = Math.sqrt(dx * dx + dy * dy);
-    if (
-      y >= bottom - bar * 1.5 &&
-      d <= outerR &&
-      d >= innerR &&
-      y >= arcCy - outerR
-    ) {
-      // only bottom half of the ring
-      if (y >= arcCy) return true;
+    const px = x / S, py = y / S;
+    const bolt = [[.58,.20],[.32,.55],[.50,.55],[.42,.82],[.72,.43],[.54,.43]];
+    let inside = false;
+    for (let i = 0, j = bolt.length - 1; i < bolt.length; j = i++) {
+      const [xi, yi] = bolt[i], [xj, yj] = bolt[j];
+      if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) inside = !inside;
     }
-    return false;
+    return inside;
   }
 
   return makePNG(S, S, (x, y) => {
     if (!inRoundedSquare(x, y)) return [0, 0, 0, 0];
     if (inGlyph(x, y)) return [255, 255, 255, 255];
-    // blue fill with slight vertical gradient
+    // Deep indigo-to-blue gradient, aligned with the launcher's accent.
     const t = y / S;
     return [
-      Math.round(37 + t * 20),
-      Math.round(99 + t * 30),
-      Math.round(235 - t * 20),
+      Math.round(38 + t * 18),
+      Math.round(67 + t * 45),
+      Math.round(184 + t * 48),
       255,
     ];
   });

@@ -33,7 +33,9 @@ export function initPermissions(): void {
  try {
   const raw = JSON.parse(fs.readFileSync(file, "utf8"));
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-   table = raw as GrantTable;
+   const candidate = raw.schemaVersion === 1 ? raw.grants : raw;
+   table = candidate && typeof candidate === "object" && !Array.isArray(candidate)
+    ? candidate as GrantTable : {};
   }
  } catch {
   table = {};
@@ -41,9 +43,12 @@ export function initPermissions(): void {
 }
 
 function persist(): void {
+ const temp = `${file}.${process.pid}.tmp`;
  try {
-  fs.writeFileSync(file, JSON.stringify(table, null, 2), "utf8");
+  fs.writeFileSync(temp, JSON.stringify({ schemaVersion: 1, grants: table }, null, 2), { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(temp, file);
  } catch (e) {
+  try { fs.unlinkSync(temp); } catch { /* ignore */ }
   console.error("[permissions] failed to persist", e);
  }
 }

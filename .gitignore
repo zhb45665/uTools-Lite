@@ -5,6 +5,7 @@ node_modules/
 dist/
 release/
 build/*.png
+!build/icon.png
 
 # logs & OS noise
 *.log

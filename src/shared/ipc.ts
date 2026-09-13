@@ -14,6 +14,10 @@ export const Ipc = {
  HotkeyGet: "hotkey:get",
  /** Set the hotkey and re-register it. Returns { ok, error? }. */
  HotkeySet: "hotkey:set",
+ SettingsGet: "settings:get",
+ SettingsSet: "settings:set",
+ DataReveal: "data:reveal",
+ LogsReveal: "logs:reveal",
  /** Request to quit the app (from settings). */
  AppQuit: "app:quit",
 
@@ -107,6 +111,12 @@ export interface AppInfo {
  appCount: number;
  pluginCount: number;
  pluginsDir: string;
+}
+
+export interface PublicSettings {
+ hotkey: string;
+ launchAtLogin: boolean;
+ theme: "system" | "light" | "dark";
 }
 
 // --- Plugin types -------------------------------------------------------

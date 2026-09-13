@@ -14,6 +14,7 @@ import {
   FileIndexStatus,
   PluginInfo,
   PermissionRequest,
+  PublicSettings,
 } from "../shared/ipc";
 
 function buildFlat(res: SearchResponse): SearchItem[] {
@@ -101,6 +102,9 @@ export default function App() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [showManage, setShowManage] = useState(false);
   const [fileIndex, setFileIndex] = useState<FileIndexStatus | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState<PublicSettings | null>(null);
+  const [hotkeyDraft, setHotkeyDraft] = useState("");
 
   const inputRef = useRef<HTMLInputElement>(null);
   const composing = useRef(false);
@@ -115,6 +119,32 @@ export default function App() {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2200);
   }, []);
+
+  const openSettings = useCallback(() => {
+    window.launcher.getSettings().then((value) => {
+      setSettings(value);
+      setHotkeyDraft(value.hotkey);
+      document.documentElement.dataset.theme = value.theme;
+      setSettingsOpen(true);
+    }).catch(() => showToast("设置读取失败"));
+  }, [showToast]);
+
+  const updateSettings = useCallback(async (patch: Partial<PublicSettings>) => {
+    if (!settings) return;
+    const next = { ...settings, ...patch };
+    await window.launcher.setSettings(patch);
+    setSettings(next);
+    document.documentElement.dataset.theme = next.theme;
+  }, [settings]);
+
+  const saveHotkey = useCallback(async () => {
+    const value = hotkeyDraft.trim();
+    if (!value) return;
+    const result = await window.launcher.setHotkey(value);
+    if (!result.ok) { showToast(result.error || "快捷键不可用"); return; }
+    setSettings((current) => current ? { ...current, hotkey: value } : current);
+    showToast("快捷键已更新");
+  }, [hotkeyDraft, showToast]);
 
   const refreshPlugins = useCallback(() => {
     window.launcher
@@ -132,6 +162,11 @@ export default function App() {
       })
       .catch(() => {});
     refreshPlugins();
+    window.launcher.getSettings().then((value) => {
+      setSettings(value);
+      setHotkeyDraft(value.hotkey);
+      document.documentElement.dataset.theme = value.theme;
+    }).catch(() => {});
   }, [refreshPlugins]);
 
   // Live file-index progress (background walk while the app runs).
@@ -499,7 +534,23 @@ export default function App() {
             <kbd>↵</kbd>
           </button>
         )}
+        <button className="settings-trigger" title="系统设置" aria-label="系统设置" onClick={openSettings}>⚙</button>
       </div>
+
+      {settingsOpen && settings && (
+        <div className="settings-backdrop" onMouseDown={() => setSettingsOpen(false)}>
+          <section className="settings-panel" role="dialog" aria-modal="true" aria-label="系统设置" onMouseDown={(e) => e.stopPropagation()}>
+            <header><div><span>系统设置</span><small>启动、外观与本地数据</small></div><button onClick={() => setSettingsOpen(false)}>×</button></header>
+            <div className="settings-body">
+              <div className="settings-section"><h2>快捷键</h2><div className="settings-row"><div><strong>唤起应用</strong><small>例如 Alt+Space、Ctrl+Shift+Space</small></div><div className="hotkey-editor"><input value={hotkeyDraft} onChange={(e) => setHotkeyDraft(e.target.value)} /><button onClick={() => void saveHotkey()}>保存</button></div></div></div>
+              <div className="settings-section"><h2>通用</h2><label className="settings-row"><div><strong>开机自动启动</strong><small>登录 Windows 后在后台运行</small></div><input type="checkbox" checked={settings.launchAtLogin} onChange={(e) => void updateSettings({ launchAtLogin: e.target.checked })} /></label></div>
+              <div className="settings-section"><h2>外观</h2><div className="settings-row"><div><strong>颜色模式</strong><small>立即应用到主界面</small></div><select value={settings.theme} onChange={(e) => void updateSettings({ theme: e.target.value as PublicSettings["theme"] })}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></div></div>
+              <div className="settings-section"><h2>本地数据</h2><div className="settings-row"><div><strong>应用数据</strong><small>设置、插件和插件私有数据</small></div><button onClick={() => void window.launcher.revealData()}>打开目录</button></div><div className="settings-row"><div><strong>诊断日志</strong><small>自动轮转，不保存密码和剪贴板正文</small></div><button onClick={() => void window.launcher.revealLogs()}>打开日志</button></div></div>
+              <div className="settings-section"><h2>文件索引</h2><div className="settings-row"><div><strong>{info?.everythingAvailable ? "Everything 索引" : "本地索引"}</strong><small>{fileIndex ? `${fileIndex.count.toLocaleString()} 个文件${fileIndex.capped ? " · 已达上限" : fileIndex.running ? " · 正在建立" : ""}` : "正在读取状态"}</small></div></div></div>
+            </div>
+          </section>
+        </div>
+      )}
 
       <div className="results" ref={resultsRef}>
         {copied && (

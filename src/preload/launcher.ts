@@ -9,6 +9,7 @@ import {
   PluginSelectResult,
   PermissionRequest,
   DetailContext,
+  PublicSettings,
 } from "../shared/ipc";
 
 /**
@@ -63,6 +64,18 @@ const launcherApi = {
       ok: boolean;
       error?: string;
     }>;
+  },
+  getSettings(): Promise<PublicSettings> {
+    return ipcRenderer.invoke(Ipc.SettingsGet) as Promise<PublicSettings>;
+  },
+  setSettings(settings: Partial<PublicSettings>): Promise<{ ok: boolean }> {
+    return ipcRenderer.invoke(Ipc.SettingsSet, settings) as Promise<{ ok: boolean }>;
+  },
+  revealData(): Promise<{ ok: boolean; error?: string }> {
+    return ipcRenderer.invoke(Ipc.DataReveal) as Promise<{ ok: boolean; error?: string }>;
+  },
+  revealLogs(): Promise<{ ok: boolean; error?: string }> {
+    return ipcRenderer.invoke(Ipc.LogsReveal) as Promise<{ ok: boolean; error?: string }>;
   },
   quit(): Promise<{ ok: boolean }> {
     return ipcRenderer.invoke(Ipc.AppQuit) as Promise<{ ok: boolean }>;

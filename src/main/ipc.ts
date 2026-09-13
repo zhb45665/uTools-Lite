@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { ipcMain, app, clipboard, dialog } from "electron";
-import { Ipc, SearchItem, CapabilityCall } from "../shared/ipc";
+import { Ipc, SearchItem, CapabilityCall, PublicSettings } from "../shared/ipc";
 import { SettingsStore } from "./store";
 import { registerHotkey, getCurrentHotkey } from "./hotkey";
 import {
@@ -18,6 +18,7 @@ import { getAppCount } from "./file-index/app-index";
 import { getIndexStatus } from "./file-index/local-index";
 import { shell } from "electron";
 import { PluginManager } from "./plugins/manager";
+import { logsDirectory, log } from "./logger";
 
 /**
  * Frame identity of the IPC sender.
@@ -142,6 +143,32 @@ export function registerIpc(
       ok: false,
       error: `Hotkey "${accelerator}" is unavailable or invalid.`,
     };
+  });
+
+  ipcMain.handle(Ipc.SettingsGet, (): PublicSettings => ({
+    hotkey: getCurrentHotkey() ?? store.get("hotkey"),
+    launchAtLogin: store.get("launchAtLogin"),
+    theme: store.get("theme"),
+  }));
+
+  ipcMain.handle(Ipc.SettingsSet, (_e, patch: Partial<PublicSettings>) => {
+    if (typeof patch?.launchAtLogin === "boolean") {
+      store.set("launchAtLogin", patch.launchAtLogin);
+      app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin });
+    }
+    if (["system", "light", "dark"].includes(String(patch?.theme))) store.set("theme", patch.theme!);
+    log("INFO", "settings", "settings updated");
+    return { ok: true };
+  });
+
+  ipcMain.handle(Ipc.DataReveal, async () => {
+    const error = await shell.openPath(app.getPath("userData"));
+    return { ok: !error, error: error || undefined };
+  });
+  ipcMain.handle(Ipc.LogsReveal, async () => {
+    fs.mkdirSync(logsDirectory(), { recursive: true });
+    const error = await shell.openPath(logsDirectory());
+    return { ok: !error, error: error || undefined };
   });
 
   ipcMain.handle(Ipc.AppQuit, () => {

@@ -77,6 +77,9 @@
   }
 }
 
+:root[data-theme="dark"] { color-scheme: dark; --panel-bg:rgba(26,26,30,.98);--panel-border:rgba(255,255,255,.08);--text:#e8e8ea;--text-strong:#fff;--text-dim:#a5afc0;--input-text:#f2f2f4;--placeholder:rgba(255,255,255,.35);--divider:rgba(255,255,255,.08);--hover:rgba(255,255,255,.08);--selected:rgba(80,120,255,.24);--detail-bg:#1a1a1e;--chip-bg:rgba(255,255,255,.08);--btn-border:rgba(255,255,255,.15); }
+:root[data-theme="light"] { color-scheme: light; }
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -147,6 +150,14 @@ body {
   border-radius: 50%;
   animation: spin .7s linear infinite;
 }
+.settings-trigger { border:0;background:transparent;color:var(--text-dim);font-size:18px;width:32px;height:32px;border-radius:8px;cursor:pointer; }
+.settings-trigger:hover { background:var(--hover);color:var(--text-strong); }
+.settings-backdrop { position:fixed;inset:0;background:rgba(10,14,24,.4);z-index:80;display:flex;justify-content:flex-end; }
+.settings-panel { width:min(510px,92%);height:100%;background:var(--panel-bg);border-left:1px solid var(--panel-border);box-shadow:-18px 0 48px rgba(0,0,0,.2);display:flex;flex-direction:column; }
+.settings-panel header { min-height:72px;padding:15px 18px;border-bottom:1px solid var(--divider);display:flex;align-items:center;justify-content:space-between; }
+.settings-panel header div { display:flex;flex-direction:column;gap:3px; }.settings-panel header span { font-size:18px;font-weight:650; }.settings-panel header small,.settings-row small { color:var(--text-dim);font-size:12px; }.settings-panel header button { border:0;background:var(--hover);color:var(--text);border-radius:8px;width:32px;height:32px;font-size:20px;cursor:pointer; }
+.settings-body { overflow:auto;padding:16px 18px 24px; }.settings-section { margin-bottom:22px; }.settings-section h2 { color:var(--text-dim);font-size:12px;font-weight:600;margin:0 0 8px 3px;text-transform:uppercase;letter-spacing:.05em; }
+.settings-row { min-height:58px;padding:10px 12px;background:var(--hover);border-bottom:1px solid var(--divider);display:flex;align-items:center;justify-content:space-between;gap:16px; }.settings-row:first-of-type { border-radius:10px 10px 0 0; }.settings-row:last-child { border-radius:0 0 10px 10px;border-bottom:0; }.settings-row:only-of-type { border-radius:10px; }.settings-row div:first-child { display:flex;flex-direction:column;gap:4px;min-width:0; }.settings-row strong { font-size:13px; }.settings-row button,.settings-row select { border:1px solid var(--btn-border);background:var(--panel-bg);color:var(--text);padding:7px 10px;border-radius:7px;cursor:pointer; }.hotkey-editor { display:flex!important;flex-direction:row!important;gap:6px!important; }.hotkey-editor input { width:138px;border:1px solid var(--btn-border);background:var(--panel-bg);color:var(--text);padding:7px 9px;border-radius:7px;outline:none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Click-to-open affordance: the mouse is never intercepted by an IME, so this

@@ -25,6 +25,7 @@ import {
   registerPluginScheme,
   registerPluginProtocol,
 } from "./plugins/protocol";
+import { initLogger, log } from "./logger";
 
 // plugin:// must be declared privileged before the app is ready.
 registerPluginScheme();
@@ -40,6 +41,8 @@ if (app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     try {
+      initLogger();
+      log("INFO", "app", "application ready", `version=${app.getVersion()}`);
       doStartup();
     } catch (e) {
       // A throw in this chain used to kill the packaged app silently
@@ -56,6 +59,7 @@ if (app.requestSingleInstanceLock()) {
         /* ignore */
       }
       console.error("[init] fatal startup error", e);
+      log("ERROR", "app", "fatal startup error", e);
     }
   });
 
@@ -112,7 +116,7 @@ if (app.requestSingleInstanceLock()) {
     // Real Windows shell icons for search results (background ~1s boot).
     warmupIcons();
 
-    app.setLoginItemSettings({ openAtLogin: false });
+    app.setLoginItemSettings({ openAtLogin: store.get("launchAtLogin") });
   }
 
   function setTray() {
