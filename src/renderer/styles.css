@@ -439,36 +439,18 @@ body {
 .detailbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
   padding: 10px 16px;
   border-bottom: 1px solid var(--divider);
 }
 
 .detailbar-name {
-  flex: 1;
   display: flex;
   align-items: center;
   gap: 10px;
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
-}
-
-.detailbar-maximize {
-  background: transparent;
-  border: 1px solid var(--divider);
-  color: var(--text-dim);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 4px 9px;
-  border-radius: 6px;
-}
-
-.detailbar-maximize:hover {
-  background: var(--hover);
-  color: var(--text-strong);
-  border-color: var(--accent);
 }
 
 .detailbar-close {

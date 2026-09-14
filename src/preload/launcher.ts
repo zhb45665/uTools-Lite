@@ -40,10 +40,6 @@ const launcherApi = {
   hide(): Promise<void> {
     return ipcRenderer.invoke(Ipc.LauncherHide);
   },
-  /** Toggle window maximize / restore (full-screen-like for the detail view). */
-  toggleMaximize(): Promise<void> {
-    return ipcRenderer.invoke(Ipc.LauncherToggleMaximize);
-  },
   search(query: string): Promise<SearchResponse> {
     return ipcRenderer.invoke(
       Ipc.SearchQuery,
@@ -309,12 +305,16 @@ const uToolsApi = {
   /** Close this detail view. Runs the page's save hooks first, then asks
    *  the host to perform the beforeClose negotiation (unsaved-changes
    *  check) before actually closing. Returns { closed: false } when the
-   *  page denied the close (e.g. the user chose "继续编辑"). */
+   *  page denied the close (e.g. the user chose "继续编辑").
+   *
+   *  For the standalone note window, this routes to the NoteWindowClose
+   *  IPC (which destroys the separate BrowserWindow) instead of the main
+   *  launcher's inline-iframe close path. */
   closeDetail(): Promise<{ closed: boolean }> {
     void runBeforeUnload();
-    return ipcRenderer.invoke(Ipc.PluginDetailClose) as Promise<{
-      closed: boolean;
-    }>;
+    const isNoteWin = isStandaloneNoteWindow();
+    const channel = isNoteWin ? Ipc.NoteWindowClose : Ipc.PluginDetailClose;
+    return ipcRenderer.invoke(channel) as Promise<{ closed: boolean }>;
   },
   /**
    * Register a hook invoked when the host asks whether the detail view may
@@ -519,6 +519,25 @@ function toastLocal(msg: string): void {
   } catch {
     /* no DOM yet */
   }
+}
+
+/**
+ * True when this plugin: frame is the TOP-LEVEL frame of the standalone
+ * note window, as opposed to a sub-frame inside the main launcher's
+ * inline iframe. The note window loads plugin://notes/detail.html directly
+ * as its main page (isMainFrame === true); the launcher embeds it in an
+ * <iframe> (isMainFrame === false). This is the reliable discriminator
+ * because the URL and pluginId are identical in both cases.
+ */
+function isStandaloneNoteWindow(): boolean {
+  if (pluginIdFromFrame !== "notes") return false;
+  // process.isMainFrame is set by Electron's preload injection for
+  // nodeIntegrationInSubFrames; it's true in a top-level BrowserWindow
+  // and false inside an <iframe>.
+  const isMainFrame =
+    typeof process !== "undefined" &&
+    (process as { isMainFrame?: boolean }).isMainFrame !== false;
+  return isMainFrame;
 }
 
 export type UToolsApi = typeof uToolsApi;

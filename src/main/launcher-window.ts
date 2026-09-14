@@ -67,7 +67,7 @@ export function createLauncherWindow(settings: SettingsStore): void {
     resizable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
-    fullscreenable: true,
+    fullscreenable: false,
     hasShadow: false,
     backgroundColor: "#00000000",
     webPreferences: {
@@ -98,9 +98,6 @@ export function createLauncherWindow(settings: SettingsStore): void {
   win.setAlwaysOnTop(true, "screen-saver");
   win.loadFile(rendererUrl());
 
-  // Don't persist rememberSize while maximized: restoring would lock the
-  // launcher into full-screen on next show. The blur handler already skips
-  // persistence when credentialOriginalSize is set; do the same here.
   win.on("blur", () => {
     if (effectiveBlurSuspended() > 0) return; // dialog / permission card open: stay visible
     // Hide when focus is lost, like Spotlight / uTools. The detail view is
@@ -113,12 +110,7 @@ export function createLauncherWindow(settings: SettingsStore): void {
     // credential workspace: the compact launcher size must not be replaced
     // by the 1000x700 detail size (risk 12.3). credentialOriginalSize
     // already holds the pre-detail size and is restored on explicit close.
-    if (
-      win &&
-      !win.isDestroyed() &&
-      !credentialOriginalSize &&
-      !win.isMaximized()
-    ) {
+    if (win && !win.isDestroyed() && !credentialOriginalSize) {
       const [w, h] = win.getContentSize();
       store.set("rememberSize", { width: w, height: h });
     }
@@ -147,17 +139,7 @@ export function showLauncher(): void {
   // editor the user left, at the expanded size. The compact size is only
   // restored by an explicit detail close (PluginDetailClose / Esc / close
   // button), which goes through closeDetail().
-  //
-  // Skip re-positioning when maximized: a maximized window ignores
-  // setPosition (Electron clamps to the work area, which de-syncs the
-  // internal maximize/restore bookkeeping and leaves the window stuck —
-  // neither maximized nor restored, and toggleMaximize() can no longer
-  // unmaximize it). Position is only meaningful for the compact, floating
-  // launcher; once the user has chosen to maximize, the next show should
-  // preserve that choice.
-  if (!win.isMaximized()) {
-    positionOnCursorDisplay(win);
-  }
+  positionOnCursorDisplay(win);
   win.show();
   win.focus();
   win.webContents.send("launcher:show");
@@ -181,40 +163,6 @@ export function toggleLauncher(): void {
   if (!win || win.isDestroyed()) return;
   if (win.isVisible()) hideLauncher();
   else showLauncher();
-}
-
-/**
- * Toggle maximize / restore for the launcher window.
- * Electron 28 cannot change transparency at runtime, so the window keeps
- * its transparent flag; the solid look comes from the renderer background
- * (CSS --bg) plus a matching setBackgroundColor as a fallback for the few
- * pixels of native chrome that are not covered by the DOM. The maximize
- * itself fills the work area, which is the "full-screen" feel the user
- * wants (no separate F11-style fullscreen API is needed for this).
- */
-export function toggleMaximize(): void {
-  if (!win || win.isDestroyed()) return;
-  if (win.isMaximized()) {
-    win.unmaximize();
-  } else {
-    win.maximize();
-  }
-}
-
-export function isMaximized(): boolean {
-  return !!win && !win.isDestroyed() && win.isMaximized();
-}
-
-/**
- * Restore the window to its compact (non-maximized) state. Called when a
- * detail view closes: the user maximized the window to read/write in the
- * detail iframe, but the next search/detail open should start from the
- * remembered compact size, not from full-screen.
- */
-export function unmaximizeWindow(): void {
-  if (win && !win.isDestroyed() && win.isMaximized()) {
-    win.unmaximize();
-  }
 }
 
 export function isLauncherVisible(): boolean {

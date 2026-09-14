@@ -25,8 +25,11 @@ import {
   suspendBlurHide,
   resumeBlurHide,
   toggleLauncher,
-  toggleMaximize,
 } from "./launcher-window";
+import {
+  isNoteWindowOpen,
+  getNoteWindow,
+} from "./note-window";
 import { runSearch } from "./search";
 import {
   detectEverything,
@@ -65,9 +68,6 @@ export function registerIpc(
     // open (edge case), it stays alive per the retention plan; the user
     // resumes it next time the launcher is shown.
     hideLauncher();
-  });
-  ipcMain.handle(Ipc.LauncherToggleMaximize, () => {
-    toggleMaximize();
   });
   ipcMain.handle(Ipc.SearchQuery, async (_e, query: string) => {
     return runSearch(query ?? "");
@@ -438,6 +438,16 @@ export function registerIpc(
     return { ok: true };
   });
 
+  // Standalone note window: Esc / close-button path. Runs the beforeClose
+  // negotiation (unsaved-changes check inside the note page) before actually
+  // destroying the window. The note window is a separate BrowserWindow from
+  // the main launcher, so it needs its own close handler.
+  ipcMain.handle(Ipc.NoteWindowClose, async () => {
+    const { closeNoteWindow } = await import("./note-window");
+    await closeNoteWindow(false);
+    return { ok: true };
+  });
+
   /**
    * Top frame asks the detail iframe whether it allows closing.
    * Re-uses the manager's negotiation (which sends to the frame directly)
@@ -454,11 +464,20 @@ export function registerIpc(
   });
 
   ipcMain.handle(Ipc.PluginDetailSend, (e, data: unknown) => {
-    pm.detailSend(data, frameIdOf(e));
+    // If the message comes from the standalone note window, route it there
+    // (bypasses activeDetail, which is bound to the main launcher iframe).
+    const fromNoteWin = isNoteWindowOpen() && e.sender === getNoteWindow()?.webContents;
+    pm.detailSend(data, frameIdOf(e), fromNoteWin ? getNoteWindow() : null);
     return { ok: true };
   });
 
-  ipcMain.handle(Ipc.PluginDetailContext, () => {
+  ipcMain.handle(Ipc.PluginDetailContext, (e) => {
+    // The standalone note window has its own context payload (not tied to
+    // the main launcher's activeDetail).
+    if (isNoteWindowOpen() && e.sender === getNoteWindow()?.webContents) {
+      const { noteWindowContext } = require("./note-window") as typeof import("./note-window");
+      return noteWindowContext();
+    }
     return pm.detailContext();
   });
 

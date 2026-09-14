@@ -19,7 +19,12 @@ import {
 import { ApiServer, GateContext } from "./api-server";
 import { PluginSandbox } from "./sandbox";
 import { authorizeDir, initPermissions } from "./permissions";
-import { setCredentialWindow, unmaximizeWindow } from "../launcher-window";
+import { setCredentialWindow } from "../launcher-window";
+import {
+  openNoteWindow,
+  isNoteWindowOpen,
+  getNoteWindow,
+} from "../note-window";
 
 /**
  * rm -rf with retries: a freshly killed sandbox may still hold its cwd
@@ -302,6 +307,26 @@ export class PluginManager {
     };
 
     if (m.detail) {
+      // Notes plugin: open in a standalone resizable window instead of the
+      // inline iframe. The main launcher keeps its compact fixed size; the
+      // note editor gets its own native-title-bar window the user can drag,
+      // resize, minimize, maximize, and close.
+      if (m.id === "notes") {
+        openNoteWindow({
+          keyword,
+          value,
+          item: { text: item.title, icon: item.icon, description: item.subtitle, data: raw.data },
+        });        // Best-effort warm start so main.js state is ready when the view opens.
+        void this.ensureLoaded(m).catch(() => {});
+        return {
+          openedDetail: {
+            pluginId: m.id,
+            pluginName: m.name,
+            detail: m.detail,
+          },
+        };
+      }
+
       setCredentialWindow(m.id === "password");
       this.activeDetail = {
         pluginId: m.id,
@@ -372,8 +397,34 @@ export class PluginManager {
     }
   }
 
-  /** Detail frame -> plugin main.js message. */
-  detailSend(data: unknown, frameId?: [number, number] | null): void {
+  /** Detail frame -> plugin main.js message.
+   *  `sourceWin` disambiguates when the message comes from the standalone
+   *  note window (vs the main launcher's inline iframe): the note window
+   *  has no activeDetail entry, so we route straight to the notes sandbox. */
+  detailSend(data: unknown, frameId?: [number, number] | null, sourceWin?: BrowserWindow | null): void {
+    // Standalone note window: route directly to the notes sandbox, bypassing
+    // activeDetail (which is bound to the main launcher's inline iframe).
+    if (sourceWin) {
+      const m = this.manifests.get("notes");
+      if (!m) return;
+      void this.ensureLoaded(m)
+        .then((sb) => {
+          sb.post("mainMessage", { data });
+        })
+        .catch((e) => {
+          const request = data as { requestId?: number } | null;
+          sourceWin?.webContents.send(Ipc.EvtDetailMessage, {
+            pluginId: "notes",
+            data: {
+              type: "res",
+              requestId: request?.requestId,
+              error: `插件启动失败：${String((e as Error).message || e)}`,
+            },
+          });
+        });
+      return;
+    }
+
     const d = this.activeDetail;
     if (!d) return;
     if (frameId) d.frameId = frameId; // remember where to send the reply
@@ -414,11 +465,6 @@ export class PluginManager {
   /** Close the detail view without the beforeClose negotiation. */
   closeDetailUnsafe(fireExit: boolean): void {
     setCredentialWindow(false);
-    // The credential workspace restore handles the 1000x700 expansion, but
-    // the maximize button (⊡) is a separate state. If the user maximized
-    // the window to read/write in the detail iframe, closeDetail must
-    // un-maximize so the next open starts from the compact remembered size.
-    unmaximizeWindow();
     const d = this.activeDetail;
     this.activeDetail = null;
     this.detailQueue = []; // never leak a previous page's messages into the next
@@ -669,6 +715,24 @@ export class PluginManager {
         console.log(`[plugin:${pluginId}]`, String(evt.params.msg ?? ""));
         break;
       case "mainMessage": {
+        // Notes plugin: when the standalone note window is open, route
+        // main.js -> detail messages there instead of the main launcher's
+        // inline iframe (which has no notes detail mounted).
+        if (pluginId === "notes") {
+          if (isNoteWindowOpen()) {
+            // Send directly to the note window's webContents.
+            // SAFETY: the note window is a top-level frame (not an iframe
+            // inside the launcher), so wc.send reaches its only frame.
+            const nw = getNoteWindow();
+            if (nw && !nw.isDestroyed()) {
+              nw.webContents.send(Ipc.EvtDetailMessage, {
+                pluginId: "notes",
+                data: evt.params.data,
+              });
+            }
+            break;
+          }
+        }
         // Forward to the detail view only when it belongs to this plugin.
         // Messages racing ahead of the iframe's onLoad are QUEUED, never
         // dropped (see detailQueue).

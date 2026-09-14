@@ -340,7 +340,10 @@ export default function App() {
       try {
         if (item.type === "plugin") {
           const r = await window.launcher.selectPlugin(item);
-          if (r.openedDetail) {
+          // Notes plugin opens in a standalone resizable window (separate
+          // BrowserWindow with a native title bar). The main launcher stays
+          // at its compact size — do NOT mount an inline iframe for notes.
+          if (r.openedDetail && r.openedDetail.pluginId !== "notes") {
             setDetail({
               pluginId: r.openedDetail.pluginId,
               pluginName: r.openedDetail.pluginName,
@@ -521,13 +524,6 @@ export default function App() {
           <span className="detailbar-name">
             <Icon name={detail.pluginId} /> {detail.pluginName}
           </span>
-          <button
-            className="detailbar-maximize"
-            onClick={() => void window.launcher.toggleMaximize()}
-            title="最大化 / 还原 (⊡)"
-          >
-            ⊡
-          </button>
           <button
             className="detailbar-close"
             onClick={() => void requestCloseDetail()}

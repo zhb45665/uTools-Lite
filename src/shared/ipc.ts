@@ -2,7 +2,10 @@
 
 export const Ipc = {
  LauncherHide: "launcher:hide",
- LauncherToggleMaximize: "launcher:toggle-maximize",
+ /** Open a standalone, resizable note-window (separate from the launcher). */
+ NoteWindowOpen: "note-window:open",
+ /** Close the standalone note-window (with beforeClose negotiation). */
+ NoteWindowClose: "note-window:close",
  /** Run a search query. */
  SearchQuery: "search:query",
  /** Open/launch a file or app. */

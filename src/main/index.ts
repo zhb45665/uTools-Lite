@@ -10,6 +10,8 @@ import {
   showLauncher,
   toggleLauncher,
   setWindowBlurHandler,
+  setBlurSuspendProbe,
+  setLauncherShownHook,
 } from "./launcher-window";
 import { registerIpc } from "./ipc";
 import { scanApps } from "./file-index/app-index";
@@ -80,6 +82,11 @@ if (app.requestSingleInstanceLock()) {
     const pluginManager = createPluginManager(() => getLauncherWindow());
     pluginManager.init();
     setWindowBlurHandler(() => pluginManager.onDetailBlur());
+    // Keep the window visible while a permission card is unanswered
+    // (a hidden card cannot be answered and would stall the plugin).
+    setBlurSuspendProbe(() => pluginManager.blurSuspendCount());
+    // On re-show, resume the active detail view (focus/scroll restore).
+    setLauncherShownHook(() => pluginManager.resumeDetail());
     registerPluginProtocol((id) => pluginManager.dirOf(id));
 
     registerIpc(store, pluginManager, () => {
@@ -152,4 +159,11 @@ app.on("before-quit", () => {
   unregisterHotkey();
   killIcons();
   getPluginManager()?.shutdown();
+  // Destroy the standalone note window (force: skip the beforeClose
+  // negotiation on quit — the page's autosave + .prev.md backup already
+  // cover data safety).
+  void (async () => {
+    const { closeNoteWindow } = await import("./note-window");
+    await closeNoteWindow(true);
+  })();
 });
