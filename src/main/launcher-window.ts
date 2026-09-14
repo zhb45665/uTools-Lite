@@ -147,7 +147,17 @@ export function showLauncher(): void {
   // editor the user left, at the expanded size. The compact size is only
   // restored by an explicit detail close (PluginDetailClose / Esc / close
   // button), which goes through closeDetail().
-  positionOnCursorDisplay(win);
+  //
+  // Skip re-positioning when maximized: a maximized window ignores
+  // setPosition (Electron clamps to the work area, which de-syncs the
+  // internal maximize/restore bookkeeping and leaves the window stuck —
+  // neither maximized nor restored, and toggleMaximize() can no longer
+  // unmaximize it). Position is only meaningful for the compact, floating
+  // launcher; once the user has chosen to maximize, the next show should
+  // preserve that choice.
+  if (!win.isMaximized()) {
+    positionOnCursorDisplay(win);
+  }
   win.show();
   win.focus();
   win.webContents.send("launcher:show");
@@ -193,6 +203,18 @@ export function toggleMaximize(): void {
 
 export function isMaximized(): boolean {
   return !!win && !win.isDestroyed() && win.isMaximized();
+}
+
+/**
+ * Restore the window to its compact (non-maximized) state. Called when a
+ * detail view closes: the user maximized the window to read/write in the
+ * detail iframe, but the next search/detail open should start from the
+ * remembered compact size, not from full-screen.
+ */
+export function unmaximizeWindow(): void {
+  if (win && !win.isDestroyed() && win.isMaximized()) {
+    win.unmaximize();
+  }
 }
 
 export function isLauncherVisible(): boolean {

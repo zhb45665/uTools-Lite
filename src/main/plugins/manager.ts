@@ -19,7 +19,7 @@ import {
 import { ApiServer, GateContext } from "./api-server";
 import { PluginSandbox } from "./sandbox";
 import { authorizeDir, initPermissions } from "./permissions";
-import { setCredentialWindow } from "../launcher-window";
+import { setCredentialWindow, unmaximizeWindow } from "../launcher-window";
 
 /**
  * rm -rf with retries: a freshly killed sandbox may still hold its cwd
@@ -58,6 +58,9 @@ const REAP_INTERVAL_MS = 60 * 1000;
 const CJK_RE = /[\u3400-\u9fff\uf900-\ufaff]/;
 
 const PERM_PROMPT_TIMEOUT_MS = 120_000;
+/** beforeClose negotiation window: long enough for a confirm dialog, short
+ *  enough that a dead page cannot wedge the close flow. */
+const BEFORE_CLOSE_TIMEOUT_MS = 10_000;
 
 interface ActiveDetail {
   pluginId: string;
@@ -96,6 +99,16 @@ export class PluginManager {
   private detailQueue: { pluginId: string; data: unknown }[] = [];
   private nextRequestId = 1;
   private pendingGrants = new Map<number, PendingGrant>();
+  /**
+   * Ref-counted blur-hide suspension for pending permission cards. A
+   * permission card needs to stay on screen to be answered; if the user
+   * switches apps while it is up, the window must not blur-hide (and a
+   * hidden card cannot be answered). Counter mirrors blurSuspended in
+   * launcher-window.ts.
+   */
+  private permSuspend = 0;
+  /** Guards against re-entrant beforeClose negotiations. */
+  private closingDetail = false;
   private reapTimer: NodeJS.Timeout | null = null;
   private shutDown = false;
   private getWin: () => BrowserWindow | null;
@@ -146,6 +159,7 @@ export class PluginManager {
       p.resolve(false);
     }
     this.pendingGrants.clear();
+    this.permSuspend = 0; // blur-hide lock released at shutdown
     if (this.reapTimer) clearInterval(this.reapTimer);
     this.reapTimer = null;
   }
@@ -366,19 +380,45 @@ export class PluginManager {
     const m = this.manifests.get(d.pluginId);
     if (!m) return;
     // A newly mounted detail page can send its first request before handshake.
-    void this.ensureLoaded(m).then(sb => {
-      if (this.activeDetail === d) sb.post("mainMessage", { data });
-    }).catch(e => {
-      if (this.activeDetail !== d) return;
-      const request = data as { requestId?: number } | null;
-      this.forwardDetailMessage(d.pluginId, { type: "res", requestId: request?.requestId,
-        error: `插件启动失败：${String((e as Error).message || e)}` });
-    });
+    void this.ensureLoaded(m)
+      .then((sb) => {
+        if (this.activeDetail === d) sb.post("mainMessage", { data });
+      })
+      .catch((e) => {
+        if (this.activeDetail !== d) return;
+        const request = data as { requestId?: number } | null;
+        this.forwardDetailMessage(d.pluginId, {
+          type: "res",
+          requestId: request?.requestId,
+          error: `插件启动失败：${String((e as Error).message || e)}`,
+        });
+      });
   }
 
-  /** Close the detail view (Esc / blur). Fires plugin onExit, reaps later. */
-  closeDetail(fireExit: boolean): void {
+  /**
+   * Close the detail view (Esc / close button / plugin switch). Performs
+   * the beforeClose negotiation first: the plugin page gets a short window
+   * to inspect unsaved state and refuse (e.g. show "继续编辑 / 放弃修改").
+   * A page that does not answer within the timeout is closed anyway (safe
+   * policy, logged). Use closeDetailUnsafe() to skip the negotiation.
+   */
+  async closeDetail(fireExit: boolean): Promise<{ closed: boolean }> {
+    const d = this.activeDetail;
+    if (!d) return { closed: true };
+    const allow = await this.negotiateBeforeClose(d);
+    if (!allow) return { closed: false };
+    this.closeDetailUnsafe(fireExit);
+    return { closed: true };
+  }
+
+  /** Close the detail view without the beforeClose negotiation. */
+  closeDetailUnsafe(fireExit: boolean): void {
     setCredentialWindow(false);
+    // The credential workspace restore handles the 1000x700 expansion, but
+    // the maximize button (⊡) is a separate state. If the user maximized
+    // the window to read/write in the detail iframe, closeDetail must
+    // un-maximize so the next open starts from the compact remembered size.
+    unmaximizeWindow();
     const d = this.activeDetail;
     this.activeDetail = null;
     this.detailQueue = []; // never leak a previous page's messages into the next
@@ -391,13 +431,145 @@ export class PluginManager {
     }
   }
 
-  /** Blur while a detail view is open: same as Esc. */
-  onDetailBlur(): void {
-    if (this.activeDetail) this.closeDetail(true);
+  /**
+   * beforeClose negotiation (retention plan 阶段二). Asks the detail iframe
+   * whether it allows closing; the page decides (e.g. confirm unsaved
+   * changes). Timeout => allow close (safe policy, logged).
+   */
+  private negotiateBeforeClose(d: ActiveDetail): Promise<boolean> {
+    const wc = this.getWin()?.webContents;
+    if (!wc || this.closingDetail) return Promise.resolve(true);
+    this.closingDetail = true;
+    const reqIdCurrent = Date.now() + Math.floor(Math.random() * 1000);
+    // SAFETY: Electron's d.ts types only a subset of WebContents events;
+    // custom ipcRenderer channel names are valid events at runtime, so the
+    // casts here only silence the incomplete event-name union and listener
+    // signature. The listener receives (event, reqId, allow) at runtime.
+    const closeResultEvent = Ipc.DetailCloseResult as unknown as "zoom-changed";
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      // SAFETY: single reference so removeListener gets the same function
+      // identity that wc.on received (listener equality is by reference).
+      const onResult = (_e: unknown, reqId: number, allow: boolean) => {
+        if (reqId === reqIdCurrent) settle(Boolean(allow), "page answer");
+      };
+      // SAFETY: the listener is wider than the d.ts zoom-changed signature;
+      // the cast keeps a single function reference for add/remove identity.
+      const onResultAny = onResult as unknown as (event: unknown) => void;
+      const settle = (allow: boolean, reason: string) => {
+        if (settled) return;
+        settled = true;
+        wc.removeListener(closeResultEvent, onResultAny);
+        this.closingDetail = false;
+        if (!allow) {
+          console.log(
+            `[plugins] beforeClose denied for ${d.pluginId}: ${reason}`,
+          );
+        }
+        resolve(allow);
+      };
+      // SAFETY: listener arity (3) is intentionally wider than the d.ts
+      // zoom-changed signature; extra runtime args are simply ignored.
+      wc.on(closeResultEvent, onResultAny);
+      const timer = setTimeout(() => {
+        settle(true, "timeout (closed per safe policy)");
+      }, BEFORE_CLOSE_TIMEOUT_MS);
+      timer.unref?.();
+      try {
+        const frameId = d.frameId;
+        if (frameId) {
+          wc.sendToFrame(frameId, Ipc.EvtDetailBeforeClose, reqIdCurrent);
+        } else {
+          wc.send(Ipc.EvtDetailBeforeClose, reqIdCurrent);
+        }
+      } catch {
+        clearTimeout(timer);
+        settle(true, "frame gone (closed per safe policy)");
+      }
+    });
   }
 
-  hasDetail(): boolean {
-    return this.activeDetail !== null;
+  /** Store a focus/scroll snapshot from the top frame, forwarded to the detail iframe. */
+  saveFocusState(state: unknown): void {
+    const d = this.activeDetail;
+    if (!d) return;
+    const wc = this.getWin()?.webContents;
+    if (!wc) return;
+    try {
+      const frameId = d.frameId;
+      if (frameId) {
+        wc.sendToFrame(frameId, Ipc.DetailSaveFocus, state);
+      } else {
+        wc.send(Ipc.DetailSaveFocus, state);
+      }
+    } catch {
+      /* frame gone */
+    }
+  }
+
+  /** Window re-shown with an active detail view: ask the page to resume. */
+  resumeDetail(): void {
+    const d = this.activeDetail;
+    if (!d) return;
+    const wc = this.getWin()?.webContents;
+    if (!wc) return;
+    try {
+      const frameId = d.frameId;
+      if (frameId) {
+        wc.sendToFrame(frameId, Ipc.EvtDetailResume);
+      } else {
+        wc.send(Ipc.EvtDetailResume);
+      }
+    } catch {
+      /* frame gone; nothing to resume */
+    }
+  }
+
+  /**
+   * Blur while a detail view is open.
+   *
+   * Per the editor-state retention plan, blur is NOT a close: the window
+   * blur-hides but the detail iframe (and its in-memory form state) must
+   * survive so the user can resume exactly where they left off. The window
+   * itself is hidden by the blur handler in launcher-window.ts.
+   */
+  onDetailBlur(): void {
+    const d = this.activeDetail;
+    if (d) this.lastActive.set(d.pluginId, Date.now());
+  }
+
+  /** Ref-counted blur-hide lock while a permission card is unanswered. */
+  suspendBlurForPermission(): number {
+    const wasSuspended = this.permSuspend;
+    this.permSuspend++;
+    return wasSuspended; // 0 -> this call is what suspends blur-hide
+  }
+
+  resumeBlurForPermission(): void {
+    this.permSuspend = Math.max(0, this.permSuspend - 1);
+  }
+
+  /** Current external blur-hide lock count (read by the window module). */
+  blurSuspendCount(): number {
+    return this.permSuspend;
+  }
+
+  /** Accessor for the top frame to inspect the active detail (read-only). */
+  activeDetailRef(): {
+    pluginId: string;
+    frameId: [number, number] | null;
+  } | null {
+    const d = this.activeDetail;
+    if (!d) return null;
+    return { pluginId: d.pluginId, frameId: d.frameId };
+  }
+
+  /** Public wrapper around the negotiation (used by the DetailBeforeClose IPC). */
+  negotiateBeforeClosePublic(_d: {
+    pluginId: string;
+    frameId: [number, number] | null;
+  }): Promise<boolean> {
+    return this.negotiateBeforeClose(this.activeDetail!);
   }
 
   /**
@@ -545,9 +717,13 @@ export class PluginManager {
     const win = this.getWin();
     if (!win) return false;
     if (!win.isVisible()) win.show(); // the card must be visible to be answered
+    // Keep the window on screen until the user answers (or the timeout
+    // fires): a hidden permission card would stall the plugin forever.
+    const wasSuspended = this.suspendBlurForPermission();
     return new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
         this.pendingGrants.delete(requestId);
+        if (wasSuspended === 0) this.resumeBlurForPermission();
         resolve(false); // unanswered => deny
       }, PERM_PROMPT_TIMEOUT_MS);
       this.pendingGrants.set(requestId, {
@@ -574,6 +750,7 @@ export class PluginManager {
     this.pendingGrants.delete(requestId);
     clearTimeout(p.timer);
     if (granted) authorizeDir(p.pluginId, p.offeredDir);
+    this.resumeBlurForPermission();
     p.resolve(granted);
   }
 
