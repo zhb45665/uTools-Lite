@@ -312,7 +312,10 @@ const uToolsApi = {
    *  launcher's inline-iframe close path. */
   closeDetail(): Promise<{ closed: boolean }> {
     void runBeforeUnload();
-    const isNoteWin = isStandaloneNoteWindow();
+    // Notes 插件的 detail 永远运行在独立窗口（App.tsx 不内嵌 notes iframe），
+    // 用 pluginId 判断路由——100% 可靠，不依赖 isStandalone latch（其
+    // identity 事件推送有不可控的时序问题，曾导致 ✕ 按钮关不掉窗口）。
+    const isNoteWin = pluginIdFromFrame === "notes";
     const channel = isNoteWin ? Ipc.NoteWindowClose : Ipc.PluginDetailClose;
     return ipcRenderer.invoke(channel) as Promise<{ closed: boolean }>;
   },
@@ -326,16 +329,18 @@ const uToolsApi = {
   get isStandalone(): boolean {
     return isStandaloneNoteWindow();
   },
-  /** Minimize the standalone note window. No-op when not in the note window. */
+  /** Minimize the standalone note window. No-op for non-notes plugins. */
   noteWindowMinimize(): Promise<{ ok: boolean }> {
-    if (!isStandaloneNoteWindow()) return Promise.resolve({ ok: false });
+    if (pluginIdFromFrame !== "notes")
+      return Promise.resolve({ ok: false });
     return ipcRenderer.invoke(Ipc.NoteWindowMinimize) as Promise<{
       ok: boolean;
     }>;
   },
   /** Toggle maximize/restore for the standalone note window. No-op otherwise. */
   noteWindowToggleMaximize(): Promise<{ ok: boolean }> {
-    if (!isStandaloneNoteWindow()) return Promise.resolve({ ok: false });
+    if (pluginIdFromFrame !== "notes")
+      return Promise.resolve({ ok: false });
     return ipcRenderer.invoke(Ipc.NoteWindowToggleMaximize) as Promise<{
       ok: boolean;
     }>;
@@ -346,7 +351,7 @@ const uToolsApi = {
    * unsubscribe. In the inline iframe the callback is never fired.
    */
   onNoteWindowState(cb: (maximized: boolean) => void): () => void {
-    if (!isStandaloneNoteWindow()) return () => {};
+    if (pluginIdFromFrame !== "notes") return () => {};
     // Reuse a dedicated push channel the main process emits on maximize/restore.
     const listener = (_e: unknown, maximized: boolean) => cb(maximized);
     ipcRenderer.on(Ipc.EvtNoteWindowState, listener);
