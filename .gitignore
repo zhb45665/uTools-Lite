@@ -20,6 +20,8 @@ release/*
 !release/uTools Lite Setup 0.1.7.exe.blockmap
 !release/uTools Lite Setup 0.1.8.exe
 !release/uTools Lite Setup 0.1.8.exe.blockmap
+!release/uTools Lite Setup 0.1.9.exe
+!release/uTools Lite Setup 0.1.9.exe.blockmap
 build/*.png
 !build/icon.png
 !build/tray-icon.png
