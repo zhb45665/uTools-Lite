@@ -1,6 +1,6 @@
 {
   "name": "utools-lite",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "uTools-style Windows launcher (P1: hotkey window + file/app search + calculator)",
   "main": "dist/main/index.js",
   "author": "uTools Lite",

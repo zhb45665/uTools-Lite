@@ -828,11 +828,12 @@
     // ---------- 初始化 ----------
     window.addEventListener("DOMContentLoaded", async () => {
       // ---------- 自定义标题栏（仅独立无边框笔记窗口） ----------
-      // 独立窗口的 plugin: 帧是顶层 frame（isMainFrame=true）；主窗口内嵌
-      // iframe 里是子帧。通过 uTools.noteWindowMinimize 是否可用来判断：
-      // 独立窗口时这些方法真正生效，内嵌 iframe 时是 no-op。这里用一个更
-      // 直接的信号：独立窗口加载的是 plugin://notes/detail.html 作为主页面。
-      const isStandalone = typeof uTools.noteWindowMinimize === "function";
+      // uTools.isStandalone 基于 process.isMainFrame 可靠区分：
+      //   true  = 独立笔记窗口（plugin://notes/detail.html 是顶层主页面）
+      //   false = 主窗口内嵌 iframe（notes 详情嵌在 launcher 的 <iframe> 里）
+      // 不能靠 typeof uTools.noteWindowMinimize === 'function' 判断：
+      // 那个方法在两种场景下都被暴露（内嵌 iframe 里是 no-op），会误判。
+      const isStandalone = uTools.isStandalone === true;
       if (isStandalone) {
         const titlebar = document.getElementById("titlebar");
         const tbMin = document.getElementById("tbMin");

@@ -10,6 +10,10 @@ let noteContext: {
   value: string;
   item: unknown;
 } | null = null;
+// Guards against a re-entrant close negotiation: destroy() re-fires the
+// "close" event, which would otherwise preventDefault() + re-negotiate
+// forever (the window could never actually close).
+let noteWinDestroying = false;
 
 /**
  * Open (or focus) a standalone, resizable note window.
@@ -84,6 +88,11 @@ export function openNoteWindow(ctx: {
   noteWin.loadURL("plugin://notes/detail.html");
 
   noteWin.on("close", (e) => {
+    // While we are the ones calling destroy() (after a successful
+    // negotiation), let the close through without re-negotiating —
+    // destroy() re-fires "close", and intercepting it again would loop
+    // forever and the window could never close.
+    if (noteWinDestroying) return;
     // Perform the beforeClose negotiation: ask the page if it has unsaved
     // changes. The page's onBeforeClose hook returns false to refuse.
     // We defer the actual close until the page answers (or times out).
@@ -152,7 +161,14 @@ async function closeWithNegotiation(force: boolean): Promise<void> {
     }
   }
 
-  noteWin.destroy();
+  // Mark as destroying BEFORE destroy() so the re-fired "close" event is
+  // not intercepted into another negotiation loop.
+  noteWinDestroying = true;
+  try {
+    noteWin.destroy();
+  } finally {
+    noteWinDestroying = false;
+  }
   noteWin = null;
   noteContext = null;
 }
