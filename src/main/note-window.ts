@@ -54,7 +54,11 @@ export function openNoteWindow(ctx: {
     x,
     y,
     useContentSize: true,
-    frame: true, // native title bar: drag / resize / minimize / maximize / close
+    // Frameless: no native blue title bar. The page draws its own minimal
+    // title bar (drag region + minimize/maximize/close buttons). Windows
+    // edge-resize works via thickFrame (native frame metrics, transparent).
+    frame: false,
+    thickFrame: true,
     title: "随手笔记",
     resizable: true,
     minimizable: true,
@@ -62,6 +66,8 @@ export function openNoteWindow(ctx: {
     fullscreenable: true,
     skipTaskbar: false,
     alwaysOnTop: false,
+    hasShadow: true,
+    // Match the notes page background so the frameless edge is seamless.
     backgroundColor: "#f7f7f9",
     webPreferences: {
       preload: path.join(__dirname, "../preload/launcher.js"),
@@ -89,6 +95,12 @@ export function openNoteWindow(ctx: {
     noteWin = null;
     noteContext = null;
   });
+
+  // Keep the custom title-bar glyph in sync with maximize/restore.
+  noteWin.on("maximize", emitWindowState);
+  noteWin.on("unmaximize", emitWindowState);
+  // Push the initial (restored) state once the page is ready to listen.
+  noteWin.webContents.on("did-finish-load", emitWindowState);
 
   // When the note window gains focus, hide the launcher (Spotlight-style):
   // the user is now "inside" the notes; pressing the hotkey again should
@@ -219,4 +231,38 @@ export function isNoteWindowOpen(): boolean {
  *  main launcher's inline iframe. */
 export function getNoteWindow(): BrowserWindow | null {
   return noteWin && !noteWin.isDestroyed() ? noteWin : null;
+}
+
+/** Minimize the note window (called from the custom title bar). */
+export function minimizeNoteWindow(): void {
+  if (noteWin && !noteWin.isDestroyed()) noteWin.minimize();
+}
+
+/** Toggle maximize / restore (called from the custom title bar). The page
+ *  listens for maximize/restore events to swap the button glyph. */
+export function toggleNoteWindowMaximize(): void {
+  if (!noteWin || noteWin.isDestroyed()) return;
+  if (noteWin.isMaximized()) noteWin.unmaximize();
+  else noteWin.maximize();
+}
+
+/**
+ * Push the current maximize/restore state to the note page so its custom
+ * title bar can swap the button glyph (⊡ maximize / ⊟ restore). Called on
+ * every maximize/restore transition and once after the window loads.
+ */
+function emitWindowState(): void {
+  if (noteWin && !noteWin.isDestroyed()) {
+    noteWin.webContents.send(Ipc.EvtNoteWindowState, noteWin.isMaximized());
+  }
+}
+
+/** Re-export for the IPC layer to call after a maximize toggle settles. */
+export function notifyNoteWindowState(): void {
+  emitWindowState();
+}
+
+/** Whether the note window is currently maximized (for the title-bar glyph). */
+export function isNoteWindowMaximized(): boolean {
+  return !!noteWin && !noteWin.isDestroyed() && noteWin.isMaximized();
 }

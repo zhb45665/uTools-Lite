@@ -6,6 +6,10 @@ export const Ipc = {
  NoteWindowOpen: "note-window:open",
  /** Close the standalone note-window (with beforeClose negotiation). */
  NoteWindowClose: "note-window:close",
+ /** Minimize the standalone note-window (from its custom title bar). */
+ NoteWindowMinimize: "note-window:minimize",
+ /** Maximize / restore the standalone note-window (custom title bar). */
+ NoteWindowToggleMaximize: "note-window:toggle-maximize",
  /** Run a search query. */
  SearchQuery: "search:query",
  /** Open/launch a file or app. */
@@ -82,6 +86,10 @@ export const Ipc = {
  // --- search result context menu (右键定位) ---
  /** Renderer -> main: 请求为搜索结果显示原生右键菜单。 */
  ResultContextMenu: "result:context-menu",
+
+ // --- standalone note window state ---
+ /** main -> note window: 最大化/还原状态变更（标题栏按钮 glyph 切换）。 */
+ EvtNoteWindowState: "note-window:evt-state",
 } as const;
 
 export type IpcChannel = (typeof Ipc)[keyof typeof Ipc];

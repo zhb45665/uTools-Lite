@@ -26,10 +26,7 @@ import {
   resumeBlurHide,
   toggleLauncher,
 } from "./launcher-window";
-import {
-  isNoteWindowOpen,
-  getNoteWindow,
-} from "./note-window";
+import { isNoteWindowOpen, getNoteWindow } from "./note-window";
 import { runSearch } from "./search";
 import {
   detectEverything,
@@ -448,6 +445,20 @@ export function registerIpc(
     return { ok: true };
   });
 
+  // Standalone note window: custom title-bar buttons (minimize / maximize).
+  // The window is frameless (no native title bar), so the page draws its
+  // own minimal title bar and these IPCs drive the window controls.
+  ipcMain.handle(Ipc.NoteWindowMinimize, () => {
+    const { minimizeNoteWindow } = require("./note-window") as typeof import("./note-window");
+    minimizeNoteWindow();
+    return { ok: true };
+  });
+  ipcMain.handle(Ipc.NoteWindowToggleMaximize, () => {
+    const { toggleNoteWindowMaximize } = require("./note-window") as typeof import("./note-window");
+    toggleNoteWindowMaximize();
+    return { ok: true };
+  });
+
   /**
    * Top frame asks the detail iframe whether it allows closing.
    * Re-uses the manager's negotiation (which sends to the frame directly)
@@ -466,7 +477,8 @@ export function registerIpc(
   ipcMain.handle(Ipc.PluginDetailSend, (e, data: unknown) => {
     // If the message comes from the standalone note window, route it there
     // (bypasses activeDetail, which is bound to the main launcher iframe).
-    const fromNoteWin = isNoteWindowOpen() && e.sender === getNoteWindow()?.webContents;
+    const fromNoteWin =
+      isNoteWindowOpen() && e.sender === getNoteWindow()?.webContents;
     pm.detailSend(data, frameIdOf(e), fromNoteWin ? getNoteWindow() : null);
     return { ok: true };
   });
@@ -475,7 +487,8 @@ export function registerIpc(
     // The standalone note window has its own context payload (not tied to
     // the main launcher's activeDetail).
     if (isNoteWindowOpen() && e.sender === getNoteWindow()?.webContents) {
-      const { noteWindowContext } = require("./note-window") as typeof import("./note-window");
+      const { noteWindowContext } =
+        require("./note-window") as typeof import("./note-window");
       return noteWindowContext();
     }
     return pm.detailContext();

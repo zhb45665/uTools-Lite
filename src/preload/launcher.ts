@@ -316,6 +316,40 @@ const uToolsApi = {
     const channel = isNoteWin ? Ipc.NoteWindowClose : Ipc.PluginDetailClose;
     return ipcRenderer.invoke(channel) as Promise<{ closed: boolean }>;
   },
+  // --- Standalone note-window controls (no-op in the inline iframe) ---
+  /**
+   * Read-only flag: true when this plugin: frame is the top-level page of the
+   * standalone note window (isMainFrame), false when it's a sub-frame inside
+   * the main launcher's inline iframe. The page uses this to decide whether
+   * to show its custom title bar (frameless window needs one).
+   */
+  get isStandalone(): boolean {
+    return isStandaloneNoteWindow();
+  },
+  /** Minimize the standalone note window. No-op when not in the note window. */
+  noteWindowMinimize(): Promise<{ ok: boolean }> {
+    if (!isStandaloneNoteWindow()) return Promise.resolve({ ok: false });
+    return ipcRenderer.invoke(Ipc.NoteWindowMinimize) as Promise<{ ok: boolean }>;
+  },
+  /** Toggle maximize/restore for the standalone note window. No-op otherwise. */
+  noteWindowToggleMaximize(): Promise<{ ok: boolean }> {
+    if (!isStandaloneNoteWindow()) return Promise.resolve({ ok: false });
+    return ipcRenderer.invoke(Ipc.NoteWindowToggleMaximize) as Promise<{ ok: boolean }>;
+  },
+  /**
+   * Subscribe to maximize/restore state changes of the standalone note
+   * window (the page swaps the title-bar glyph between ⊡ and ⊟). Returns
+   * unsubscribe. In the inline iframe the callback is never fired.
+   */
+  onNoteWindowState(cb: (maximized: boolean) => void): () => void {
+    if (!isStandaloneNoteWindow()) return () => {};
+    // Reuse a dedicated push channel the main process emits on maximize/restore.
+    const listener = (_e: unknown, maximized: boolean) => cb(maximized);
+    ipcRenderer.on(Ipc.EvtNoteWindowState, listener);
+    return () => {
+      ipcRenderer.removeListener(Ipc.EvtNoteWindowState, listener);
+    };
+  },
   /**
    * Register a hook invoked when the host asks whether the detail view may
    * be closed (retention plan 阶段二). Return true to allow, false to keep

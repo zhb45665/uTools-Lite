@@ -44,7 +44,12 @@ export class SettingsStore {
         ...DEFAULTS,
         hotkey: typeof parsed.hotkey === "string" ? parsed.hotkey : DEFAULTS.hotkey,
         rememberSize: size && Number.isFinite(size.width) && Number.isFinite(size.height)
-          ? { width: Math.max(520, Math.min(1400, size.width!)), height: Math.max(360, Math.min(1000, size.height!)) }
+          // Cap at a size comfortably below any work area: the launcher is a
+          // compact floating card, and the credential workspace expands via
+          // setCredentialWindow (not via rememberSize). A persisted
+          // full-screen size (e.g. from a pre-guard maximize bug) must not
+          // survive a restart — clamp it back to the compact range.
+          ? { width: Math.max(520, Math.min(1200, size.width!)), height: Math.max(360, Math.min(800, size.height!)) }
           : DEFAULTS.rememberSize,
         hasLaunchedBefore: parsed.hasLaunchedBefore === true,
         launchAtLogin: parsed.launchAtLogin === true,
