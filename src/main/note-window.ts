@@ -84,8 +84,14 @@ export function openNoteWindow(ctx: {
     },
   });
 
-  // Load the notes detail page via the plugin: scheme.
-  noteWin.loadURL("plugin://notes/detail.html");
+  // Load the notes detail page via the plugin: scheme. The ?standalone=1
+  // query flag is the RELIABLE discriminator between the standalone note
+  // window and the main launcher's inline iframe: both load the same
+  // plugin://notes/detail.html path, but only the standalone window carries
+  // this query. (process.isMainFrame in the preload is unreliable — process
+  // is not always available in the isolated preload world, which caused the
+  // close button to route to the wrong IPC channel.)
+  noteWin.loadURL("plugin://notes/detail.html?standalone=1");
 
   noteWin.on("close", (e) => {
     // While we are the ones calling destroy() (after a successful
@@ -134,10 +140,15 @@ export async function closeNoteWindow(force = false): Promise<void> {
 
 async function closeWithNegotiation(force: boolean): Promise<void> {
   if (!noteWin || noteWin.isDestroyed()) return;
+  console.log(
+    `[note-window] closeWithNegotiation force=${force} win=${noteWin.id}`,
+  );
 
   if (!force) {
     // Ask the page: may we close?
+    console.log("[note-window] negotiating beforeClose...");
     const allow = await negotiateBeforeClose(noteWin);
+    console.log(`[note-window] negotiation result allow=${allow}`);
     if (!allow) return; // page said no — stay open
   }
 
@@ -165,12 +176,16 @@ async function closeWithNegotiation(force: boolean): Promise<void> {
   // not intercepted into another negotiation loop.
   noteWinDestroying = true;
   try {
+    console.log("[note-window] calling destroy()");
     noteWin.destroy();
+  } catch (e) {
+    console.error("[note-window] destroy() threw", e);
   } finally {
     noteWinDestroying = false;
   }
   noteWin = null;
   noteContext = null;
+  console.log("[note-window] closeWithNegotiation done");
 }
 
 /**
@@ -184,7 +199,10 @@ function negotiateBeforeClose(win: BrowserWindow): Promise<boolean> {
     const reqId = Date.now() + Math.floor(Math.random() * 1000);
 
     const onResult = (_e: unknown, id: number, allow: boolean) => {
-      if (id === reqId) settle(Boolean(allow));
+      if (id === reqId) {
+        console.log(`[note-window] DetailCloseResult received allow=${allow}`);
+        settle(Boolean(allow));
+      }
     };
     // SAFETY: Electron's d.ts only types a subset of WebContents events;
     // the cast silences the incomplete event-name union. The listener
@@ -203,7 +221,10 @@ function negotiateBeforeClose(win: BrowserWindow): Promise<boolean> {
       resolve(allow);
     };
 
-    const timer = setTimeout(() => settle(true), 10_000);
+    const timer = setTimeout(() => {
+      console.log("[note-window] negotiation TIMEOUT -> allow close");
+      settle(true);
+    }, 10_000);
     timer.unref?.();
 
     // SAFETY: same event-name union cast; see comment on onResultAny.
@@ -211,6 +232,7 @@ function negotiateBeforeClose(win: BrowserWindow): Promise<boolean> {
       Ipc.DetailCloseResult as unknown as "zoom-changed",
       onResultAny,
     );
+    console.log("[note-window] sending EvtDetailBeforeClose to page");
     win.webContents.send(Ipc.EvtDetailBeforeClose, reqId);
   });
 }

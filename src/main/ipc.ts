@@ -440,7 +440,9 @@ export function registerIpc(
   // destroying the window. The note window is a separate BrowserWindow from
   // the main launcher, so it needs its own close handler.
   ipcMain.handle(Ipc.NoteWindowClose, async () => {
-    const { closeNoteWindow } = await import("./note-window");
+    console.log("[ipc] NoteWindowClose received");
+    const { closeNoteWindow, isNoteWindowOpen } = await import("./note-window");
+    console.log(`[ipc] NoteWindowClose isNoteWindowOpen=${isNoteWindowOpen()}`);
     await closeNoteWindow(false);
     return { ok: true };
   });
@@ -449,12 +451,14 @@ export function registerIpc(
   // The window is frameless (no native title bar), so the page draws its
   // own minimal title bar and these IPCs drive the window controls.
   ipcMain.handle(Ipc.NoteWindowMinimize, () => {
-    const { minimizeNoteWindow } = require("./note-window") as typeof import("./note-window");
+    const { minimizeNoteWindow } =
+      require("./note-window") as typeof import("./note-window");
     minimizeNoteWindow();
     return { ok: true };
   });
   ipcMain.handle(Ipc.NoteWindowToggleMaximize, () => {
-    const { toggleNoteWindowMaximize } = require("./note-window") as typeof import("./note-window");
+    const { toggleNoteWindowMaximize } =
+      require("./note-window") as typeof import("./note-window");
     toggleNoteWindowMaximize();
     return { ok: true };
   });

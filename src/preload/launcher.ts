@@ -329,12 +329,16 @@ const uToolsApi = {
   /** Minimize the standalone note window. No-op when not in the note window. */
   noteWindowMinimize(): Promise<{ ok: boolean }> {
     if (!isStandaloneNoteWindow()) return Promise.resolve({ ok: false });
-    return ipcRenderer.invoke(Ipc.NoteWindowMinimize) as Promise<{ ok: boolean }>;
+    return ipcRenderer.invoke(Ipc.NoteWindowMinimize) as Promise<{
+      ok: boolean;
+    }>;
   },
   /** Toggle maximize/restore for the standalone note window. No-op otherwise. */
   noteWindowToggleMaximize(): Promise<{ ok: boolean }> {
     if (!isStandaloneNoteWindow()) return Promise.resolve({ ok: false });
-    return ipcRenderer.invoke(Ipc.NoteWindowToggleMaximize) as Promise<{ ok: boolean }>;
+    return ipcRenderer.invoke(Ipc.NoteWindowToggleMaximize) as Promise<{
+      ok: boolean;
+    }>;
   },
   /**
    * Subscribe to maximize/restore state changes of the standalone note
@@ -565,13 +569,12 @@ function toastLocal(msg: string): void {
  */
 function isStandaloneNoteWindow(): boolean {
   if (pluginIdFromFrame !== "notes") return false;
-  // process.isMainFrame is set by Electron's preload injection for
-  // nodeIntegrationInSubFrames; it's true in a top-level BrowserWindow
-  // and false inside an <iframe>.
-  const isMainFrame =
-    typeof process !== "undefined" &&
-    (process as { isMainFrame?: boolean }).isMainFrame !== false;
-  return isMainFrame;
+  // Reliable discriminator: the standalone note window loads
+  // plugin://notes/detail.html?standalone=1, while the main launcher's inline
+  // iframe loads the same path WITHOUT the query. process.isMainFrame is NOT
+  // used here — process is not always available in the isolated preload
+  // world, which made the old check unreliable and broke the close button.
+  return location.search.includes("standalone=1");
 }
 
 export type UToolsApi = typeof uToolsApi;
