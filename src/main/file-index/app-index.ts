@@ -1,3 +1,4 @@
+import { pinyinHaystack, toPinyinInitials } from "../pinyin-match";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -20,6 +21,7 @@ export interface AppEntry {
 }
 
 let cache: AppEntry[] | null = null;
+let pinyinCache: Map<string, string[]> | null = null;
 let scanning = false;
 let lastScanError: string | null = null;
 
@@ -68,6 +70,22 @@ async function walk(dir: string, out: string[], depth: number): Promise<void> {
       out.push(full);
     }
   }
+}
+
+/**
+ * The two pinyin haystacks for one app name:
+ *  - full pinyin concatenated onto the original ("微信weixin")
+ *  - first-letter abbreviation ("wx")
+ * Cached across searches (app list changes only on re-scan).
+ */
+export function appPinyinKeys(name: string): string[] {
+  if (!pinyinCache) pinyinCache = new Map();
+  let k = pinyinCache.get(name);
+  if (!k) {
+    k = [pinyinHaystack(name), toPinyinInitials(name)];
+    pinyinCache.set(name, k);
+  }
+  return k;
 }
 
 const PS_TIMEOUT_MS = 8000;
@@ -207,6 +225,7 @@ async function doScan(): Promise<AppEntry[]> {
     a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
   );
   cache = list;
+  pinyinCache = null;
   scanning = false;
   return list;
 }

@@ -1,6 +1,11 @@
 import { filter } from "fuzzaldrin-plus";
+import type { AppEntry } from "./file-index/app-index";
 import { SearchItem, SearchResponse } from "../shared/ipc";
-import { searchEverything, findEverythingExe } from "./file-index/everything-cli";
+import {
+  searchEverything,
+  findEverythingExe,
+} from "./file-index/everything-cli";
+import { appPinyinKeys } from "./file-index/app-index";
 import { scanApps } from "./file-index/app-index";
 import { searchLocalIndex, getIndexStatus } from "./file-index/local-index";
 import { getIconUrl } from "./file-index/icon-service";
@@ -119,7 +124,17 @@ const APP_SOURCE_LABEL: Record<string, string> = {
 async function matchAppsAsync(query: string, limit = 8): Promise<SearchItem[]> {
   const apps = await scanApps();
   if (!apps.length || !query.trim()) return [];
-  const hits = filter(apps, query, { key: "name", maxResults: limit });
+  // Match against name + full pinyin + pinyin initials, so "微信" is found
+  // by "微", "wx", "weixin" and "weix" alike.
+  type AppWithPinyin = AppEntry & { pinyin: string };
+  const withPinyin: AppWithPinyin[] = apps.map((a) => ({
+    ...a,
+    pinyin: appPinyinKeys(a.name).join(" "),
+  }));
+  const hits = filter(withPinyin, query, {
+    key: "pinyin",
+    maxResults: limit,
+  });
   return hits.map((a, i) => ({
     id: `app:${i}:${a.name}`,
     type: "app" as const,
@@ -199,11 +214,13 @@ export async function runSearch(query: string): Promise<SearchResponse> {
     }
   }
 
-  // Everything 联动：本地安装了 Everything 时，提供回车直达全盘检索入口
+  // Everything 联动：本地安装了 Everything 时，提供回车直达全盘检索入口。
+  // 注意：应用命中后（appsFirst=true）这个入口会排到应用/文件之后，
+  // 因为用户意图是启动应用而非全盘文件搜索。
   if (findEverythingExe()) {
     response.commands.push({
       id: `cmd:everything:${q}`,
-      type: "command",
+      type: "command" as const,
       title: `在 Everything 中搜索「${q}」`,
       subtitle: "回车调起本地 Everything 极速呈现全盘结果",
       icon: "🔍",
@@ -226,6 +243,8 @@ export async function runSearch(query: string): Promise<SearchResponse> {
     })(),
     matchAppsAsync(q, 8),
   ]);
+  // 应用命中时，应用排在文件之前（应用是主要意图，Everything 结果靠后）。
+  if (apps.length > 0) response.appsFirst = true;
   if (fileRes.available) {
     // Everything is authoritative when present: its index is complete, so
     // zero hits means zero files — no local fallback needed.
@@ -259,7 +278,7 @@ export async function runSearch(query: string): Promise<SearchResponse> {
   // Real shell icons for files, classic .lnk apps AND Store/builtin apps:
   // their `shell:AppsFolder\<AppID>` target is resolved by the icon service
   // via SHParseDisplayName + SHGetFileInfo(SHGFI_PIDL).
-  const iconTargets = [...response.files, ...response.apps];
+  const iconTargets = [...response.apps, ...response.files];
   if (iconTargets.length > 0) {
     const urls = await Promise.race([
       Promise.all(iconTargets.map((it) => getIconUrl(it.payload))),

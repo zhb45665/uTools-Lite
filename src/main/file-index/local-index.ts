@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { FileIndexStatus } from "../../shared/ipc";
+import { toPinyin, toPinyinInitials } from "../pinyin-match";
 
 /**
  * Local file index — the offline fallback when Everything (`es` CLI) is not
@@ -36,6 +37,10 @@ const MAX_ENTRIES = 600_000;
 interface State {
   orig: string[];
   keys: string[];
+  /** Full-pinyin form of each filename (CJK-only names only, else ""). */
+  py: string[];
+  /** Pinyin initials of each filename (CJK-only names only, else ""). */
+  pyinit: string[];
   running: boolean;
   complete: boolean;
   capped: boolean;
@@ -45,6 +50,8 @@ interface State {
 const state: State = {
   orig: [],
   keys: [],
+  py: [],
+  pyinit: [],
   running: false,
   complete: false,
   capped: false,
@@ -100,7 +107,8 @@ function listDriveRoots(): string[] {
   // fs.accessSync on a drive root returns immediately for present local
   // drives and throws fast for absent letters. Probe C: through Z: (skip A/B floppy).
   const roots: string[] = [];
-  for (let i = 67; i <= 90; i++) { // C-Z
+  for (let i = 67; i <= 90; i++) {
+    // C-Z
     const letter = String.fromCharCode(i);
     try {
       fs.accessSync(letter + ":\\", fs.constants.F_OK);
@@ -155,6 +163,12 @@ function addEntry(full: string, nameLower: string, dir: string): void {
   const great = path.basename(path.dirname(path.dirname(dir))).toLowerCase();
   state.orig.push(full);
   state.keys.push(nameLower + " " + parent + " " + grand + " " + great);
+  // Pinyin haystacks for CJK names: full pinyin + initials, both stored
+  // lowercased (pinyin-pro already returns lowercase). Non-CJK names get
+  // "" — ASCII lookup falls through to the plain key index.
+  const cjk = /[\u4e00-\u9fff]/.test(nameLower);
+  state.py.push(cjk ? toPinyin(nameLower) : "");
+  state.pyinit.push(cjk ? toPinyinInitials(nameLower) : "");
 }
 
 async function walkDir(
@@ -310,20 +324,38 @@ export function searchLocalIndex(
 
   const keys = state.keys;
   const orig = state.orig;
+  const py = state.py;
+  const pyinit = state.pyinit;
+  const pyRelevant = /[a-z0-9]/.test(needle);
   for (let i = 0; i < n; i++) {
     const k = keys[i];
-    const p = k.indexOf(needle);
-    if (p === -1) continue;
-    const firstSpace = k.indexOf(" ");
     let score: number;
-    if (p < firstSpace) {
-      // matched inside the filename
-      score = p === 0 ? 100 : 80;
+    const plainP = k.indexOf(needle);
+    if (plainP !== -1) {
+      const firstSpace = k.indexOf(" ");
+      if (plainP < firstSpace) {
+        // matched inside the filename
+        score = plainP === 0 ? 100 : 80;
+        if (plainP === 0 || k.charCodeAt(plainP - 1) === 32) score += 10;
+      } else {
+        // matched inside a directory segment
+        score = 30;
+        if (k.charCodeAt(plainP - 1) === 32) score += 10;
+      }
+    } else if (pyRelevant) {
+      // Pinyin path: match the query inside the filename's full pinyin
+      // (90) or its initials (85). Only considered when the plain lookup
+      // missed, so ASCII-only names keep their existing behavior.
+      if (py[i].indexOf(needle) !== -1) {
+        score = 90;
+      } else if (pyinit[i].indexOf(needle) !== -1) {
+        score = 85;
+      } else {
+        continue;
+      }
     } else {
-      // matched inside a directory segment
-      score = 30;
+      continue;
     }
-    if (p === 0 || k.charCodeAt(p - 1) === 32) score += 10; // segment start
     const len = orig[i].length;
 
     const worst = top[top.length - 1];
