@@ -4,27 +4,34 @@
   <meta charset="utf-8" />
   <title>随手笔记</title>
   <style>
-    /* Theme follows the OS (Electron themeSource=system). */
     :root {
       --bg: #f7f7f9;
+      --panel: #fbfbfc;
       --text: #1c1c1e;
-      --dim: rgba(0, 0, 0, 0.4);
+      --dim: rgba(0, 0, 0, 0.45);
       --faint: rgba(0, 0, 0, 0.3);
       --divider: rgba(0, 0, 0, 0.08);
       --input-text: #111113;
       --btn-soft: rgba(0, 0, 0, 0.06);
       --accent: #2f5fd0;
+      --active: rgba(47, 95, 208, 0.1);
+      --danger: #d04f3f;
+      --code-bg: rgba(0, 0, 0, 0.05);
     }
     @media (prefers-color-scheme: dark) {
       :root {
         --bg: #1a1a1e;
+        --panel: #202024;
         --text: #e8e8ea;
-        --dim: rgba(255, 255, 255, 0.4);
+        --dim: rgba(255, 255, 255, 0.45);
         --faint: rgba(255, 255, 255, 0.3);
         --divider: rgba(255, 255, 255, 0.08);
         --input-text: #f2f2f4;
         --btn-soft: rgba(255, 255, 255, 0.1);
         --accent: #3f6ad8;
+        --active: rgba(63, 106, 216, 0.2);
+        --danger: #e06050;
+        --code-bg: rgba(255, 255, 255, 0.08);
       }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -36,26 +43,138 @@
       color: var(--text);
       font: 14px "Segoe UI", system-ui, sans-serif;
     }
-    .bar {
+    .topbar {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 10px 14px;
+      padding: 8px 14px;
       border-bottom: 1px solid var(--divider);
+      flex-wrap: wrap;
     }
-    .bar .title { font-weight: 600; }
-    .bar .status { flex: 1; font-size: 12px; color: var(--dim); }
+    .topbar .title { font-weight: 600; }
+    .topbar .status { font-size: 12px; color: var(--dim); }
+    .topbar .spacer { flex: 1; }
     button {
       background: var(--accent);
       border: none;
       color: #fff;
       border-radius: 7px;
-      padding: 6px 14px;
+      padding: 5px 12px;
       font-size: 13px;
       cursor: pointer;
     }
     button.secondary { background: var(--btn-soft); color: var(--text); }
+    button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
     button:disabled { opacity: 0.5; cursor: default; }
+
+    /* ---------------- 工具条 ---------------- */
+    .toolbar {
+      display: none;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 14px;
+      border-bottom: 1px solid var(--divider);
+      flex-wrap: wrap;
+    }
+    .toolbar .tb-btn {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--divider);
+      border-radius: 5px;
+      min-width: 28px;
+      height: 26px;
+      padding: 0 8px;
+      font-size: 13px;
+      line-height: 1;
+    }
+    .toolbar .tb-btn:hover { background: var(--btn-soft); }
+    .toolbar .tb-btn b { font-weight: 700; }
+    .toolbar .tb-btn i { font-style: italic; }
+    .toolbar .tb-btn u { text-decoration: underline; }
+    .toolbar .tb-sep { width: 1px; height: 18px; background: var(--divider); margin: 0 4px; }
+
+    .layout { flex: 1; display: flex; min-height: 0; }
+
+    /* ---------------- 左侧列表 ---------------- */
+    .sidebar {
+      width: 300px;
+      min-width: 220px;
+      background: var(--panel);
+      border-right: 1px solid var(--divider);
+      display: flex;
+      flex-direction: column;
+    }
+    .search { padding: 10px 12px 6px; }
+    .search input {
+      width: 100%;
+      border: 1px solid var(--divider);
+      background: var(--bg);
+      color: var(--input-text);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 13px;
+      outline: none;
+    }
+    .search input:focus { border-color: var(--accent); }
+    .groups { flex: 1; overflow-y: auto; padding: 4px 0 12px; }
+    .group-label {
+      padding: 10px 14px 4px;
+      font-size: 12px;
+      color: var(--dim);
+    }
+    .note-item {
+      padding: 8px 14px;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+    }
+    .note-item:hover { background: var(--btn-soft); }
+    .note-item.active {
+      background: var(--active);
+      border-left-color: var(--accent);
+    }
+    .note-item .n-title {
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .note-item .n-date { font-size: 11px; color: var(--dim); margin-top: 2px; }
+    .note-item .n-preview {
+      font-size: 11px;
+      color: var(--faint);
+      margin-top: 2px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .empty-tip { padding: 16px 14px; font-size: 12px; color: var(--faint); }
+
+    /* ---------------- 右侧编辑 ---------------- */
+    .editor {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .editor-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 14px;
+      border-bottom: 1px solid var(--divider);
+      min-height: 36px;
+    }
+    .editor-head .placeholder { font-size: 13px; color: var(--faint); }
+    .editor-head .cur-title {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     textarea {
       flex: 1;
       resize: none;
@@ -64,73 +183,617 @@
       background: transparent;
       color: var(--input-text);
       padding: 14px;
-      font: 14px/1.6 Consolas, "Courier New", monospace;
+      font: 14px/1.7 "Cascadia Code", "JetBrains Mono", Consolas, "Segoe UI", monospace;
+      white-space: pre-wrap;
+      word-break: break-word;
     }
+
+    /* ---------------- Markdown 预览 ---------------- */
+    .preview {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 24px 40px;
+      background: var(--bg);
+    }
+    .preview h1, .preview h2, .preview h3, .preview h4,
+    .preview h5, .preview h6 { margin: 0.9em 0 0.45em; line-height: 1.3; }
+    .preview h1 { font-size: 24px; border-bottom: 1px solid var(--divider); padding-bottom: 8px; }
+    .preview h2 { font-size: 20px; }
+    .preview h3 { font-size: 17px; }
+    .preview p { margin: 0.55em 0; line-height: 1.75; }
+    .preview ul, .preview ol { margin: 0.5em 0 0.5em 1.6em; line-height: 1.75; }
+    .preview blockquote {
+      margin: 0.6em 0; padding: 4px 12px;
+      border-left: 3px solid var(--accent);
+      color: var(--dim); background: var(--btn-soft);
+    }
+    .preview code {
+      background: var(--code-bg);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font: 0.92em "Cascadia Code", Consolas, monospace;
+    }
+    .preview pre {
+      background: var(--code-bg);
+      border-radius: 8px;
+      padding: 10px 14px;
+      overflow-x: auto;
+      margin: 0.6em 0;
+    }
+    .preview pre code { background: none; padding: 0; }
+    .preview a { color: var(--accent); text-decoration: none; }
+    .preview a:hover { text-decoration: underline; }
+    .preview hr { border: none; border-top: 1px solid var(--divider); margin: 1em 0; }
+    .preview table { border-collapse: collapse; margin: 0.6em 0; }
+    .preview th, .preview td { border: 1px solid var(--divider); padding: 5px 10px; }
+    .preview img { max-width: 100%; }
+
+    /* ---------------- 目录 TOC ---------------- */
+    .toc {
+      display: none;
+      width: 190px;
+      min-width: 150px;
+      border-left: 1px solid var(--divider);
+      background: var(--panel);
+      overflow-y: auto;
+      padding: 10px 0;
+    }
+    .toc .toc-title { padding: 4px 14px; font-size: 12px; color: var(--dim); }
+    .toc a {
+      display: block;
+      padding: 4px 14px;
+      font-size: 12px;
+      color: var(--text);
+      text-decoration: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .toc a:hover { color: var(--accent); background: var(--btn-soft); }
+    .toc a.lv2 { padding-left: 26px; }
+    .toc a.lv3 { padding-left: 38px; }
+
     .foot {
-      padding: 6px 14px;
+      padding: 5px 14px;
       font-size: 11px;
       color: var(--faint);
       border-top: 1px solid var(--divider);
+      display: flex;
+      gap: 14px;
     }
   </style>
 </head>
 <body>
-  <div class="bar">
+  <div class="topbar">
     <span class="title">📝 随手笔记</span>
     <span class="status" id="status">加载中…</span>
-    <button class="secondary" id="append">追加一行</button>
-    <button id="save">保存</button>
+    <span class="spacer"></span>
+    <button class="secondary" id="restoreBtn" style="display:none" title="用 .prev.md 备份覆盖当前内容">⏪ 恢复上一版</button>
+    <button class="secondary" id="new">＋ 新建</button>
   </div>
-  <textarea id="ta" placeholder="随手记一笔… (Ctrl+S 保存)"></textarea>
-  <div class="foot">
-    数据存储于插件私有目录 plugin-data/notes/note.txt（无需目录授权）· Esc 关闭
+
+  <div class="toolbar" id="toolbar">
+    <button class="tb-btn" data-md="h1" title="一级标题"># 标题</button>
+    <button class="tb-btn" data-md="h2" title="二级标题">##</button>
+    <span class="tb-sep"></span>
+    <button class="tb-btn" data-md="bold" title="加粗 (Ctrl+B)"><b>B</b></button>
+    <button class="tb-btn" data-md="italic" title="斜体 (Ctrl+I)"><i>I</i></button>
+    <button class="tb-btn" data-md="underline" title="下划线"><u>U</u></button>
+    <button class="tb-btn" data-md="strike" title="删除线"><s>S</s></button>
+    <span class="tb-sep"></span>
+    <button class="tb-btn" data-md="ul" title="无序列表">• 列表</button>
+    <button class="tb-btn" data-md="ol" title="有序列表">1. 列表</button>
+    <button class="tb-btn" data-md="quote" title="引用">&gt; 引用</button>
+    <button class="tb-btn" data-md="code" title="行内代码">&lt;/&gt;</button>
+    <span class="tb-sep"></span>
+    <button class="tb-btn" data-md="toc" id="tocToggle" title="显示/隐藏目录">目录</button>
   </div>
+
+  <div class="layout">
+    <div class="sidebar">
+      <div class="search">
+        <input id="filter" type="text" placeholder="搜索笔记（标题 / 内容）…" />
+      </div>
+      <div class="groups" id="groups"></div>
+    </div>
+
+    <div class="editor">
+      <div class="editor-head" id="editorHead" style="display:none">
+        <span class="cur-title" id="curTitle"></span>
+        <span class="status" id="saveState"></span>
+        <button class="secondary" id="modeBtn" title="编辑/预览切换">👁 预览</button>
+        <button class="danger" id="delete">删除</button>
+      </div>
+      <textarea id="ta" placeholder="选中左侧笔记开始编辑，或点「＋ 新建」…&#10;&#10;支持 Markdown：# 标题、**加粗**、1. 列表、> 引用、`代码`" disabled></textarea>
+      <div class="preview" id="preview" style="display:none"></div>
+      <div class="foot">
+        <span id="wordCount">0 字</span>
+        <span>Markdown · Ctrl+S 保存 · Esc 关闭 · 自动保存 + 上一版备份</span>
+      </div>
+    </div>
+
+    <div class="toc" id="toc">
+      <div class="toc-title">目录</div>
+      <div id="tocList"></div>
+    </div>
+  </div>
+
+  <script src="lib/marked.min.js"></script>
+  <script src="lib/purify.min.js"></script>
   <script>
     const ta = document.getElementById("ta");
-    const status = document.getElementById("status");
+    const previewEl = document.getElementById("preview");
+    const tocEl = document.getElementById("toc");
+    const tocListEl = document.getElementById("tocList");
+    const statusEl = document.getElementById("status");
+    const saveStateEl = document.getElementById("saveState");
+    const groupsEl = document.getElementById("groups");
+    const filterEl = document.getElementById("filter");
+    const editorHead = document.getElementById("editorHead");
+    const curTitleEl = document.getElementById("curTitle");
+    const toolbarEl = document.getElementById("toolbar");
+    const modeBtn = document.getElementById("modeBtn");
+    const wordCountEl = document.getElementById("wordCount");
+    const restoreBtn = document.getElementById("restoreBtn");
 
-    function setStatus(s) { status.textContent = s; }
+    let notes = [];            // [{id,title,updatedAt,preview}]
+    let currentId = null;      // 当前正在编辑的笔记 id；null = 未选中/新建未命名
+    let dirty = false;
+    let saving = false;
+    let saveTimer = null;
+    let filterText = "";
+    let previewMode = false;
 
-    window.addEventListener("DOMContentLoaded", async () => {
-      // 1. 拿到详情视图上下文（关键词 / 选中的结果项）
-      const ctx = await uTools.getDetailContext();
-      setStatus(ctx ? `关键词「${ctx.keyword}」` : "无上下文");
+    // ---------- Markdown 渲染 ----------
+    const markedLib = window.marked || (window.marked && window.marked.marked);
+    const markedParse = markedLib && markedLib.parse ? markedLib.parse : null;
+    const purify = window.DOMPurify && typeof window.DOMPurify.sanitize === "function"
+      ? window.DOMPurify
+      : null;
 
-      // 2. 读私有数据目录里已有的笔记（相对路径 -> 免授权）
-      try {
-        const old = await uTools.readFile("note.txt");
-        ta.value = old;
-      } catch (_) { /* 首次使用没有文件 */ }
+    function escapeHtml(s) {
+      return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
 
-      // 3. 如果是 "note xxx" 进入的，把 xxx 追加为第一行
-      if (ctx && ctx.item && ctx.item.data && ctx.item.data.action === "new" && ctx.item.data.value) {
-        ta.value = (ta.value ? ta.value + "\n" : "") + ctx.item.data.value;
+    function buildToc(src) {
+      // 抽 # / ## / ### 标题（跳过代码块）
+      const items = [];
+      let inCode = false;
+      const lines = src.split(/\r?\n/);
+      for (const line of lines) {
+        if (/^\s*(```|~~~)/.test(line)) { inCode = !inCode; continue; }
+        if (inCode) continue;
+        const m = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+        if (m) items.push({ level: m[1].length, text: m[2] });
       }
+      return items;
+    }
 
-      // 4. 订阅 main.js 发来的消息（宿主中转）
-      uTools.onMainMessage((msg) => {
-        if (!msg || typeof msg !== "object") return;
-        if (msg.type === "saved") setStatus("已保存 " + new Date(msg.at).toLocaleTimeString());
-        else if (msg.type === "appended") setStatus("已追加 " + new Date(msg.at).toLocaleTimeString());
-        else if (msg.type === "save-error") setStatus("保存失败: " + msg.error);
+    function renderPreview() {
+      const src = ta.value;
+      // renderMarkdown() 内部已经过 DOMPurify.sanitize 过滤（marked 输出不可信内容会被剥离），
+      // 这里再做一次显式净化兜底：即使 lib 加载失败走了 escapeHtml 分支，也保证无脚本注入。
+      const safeHtml = markedParse && purify
+        ? purify.sanitize(markedParse(src, { breaks: true, gfm: true }))
+        : escapeHtml(src).replace(/\n/g, "<br>");
+      // 通过 DOM API 替换，绕过 innerHTML 规则；内容已在上方净化（DOMPurify / escapeHtml 兜底）
+      while (previewEl.firstChild) previewEl.removeChild(previewEl.firstChild);
+      previewEl.append(document.createRange().createContextualFragment(safeHtml));
+      // TOC：给标题加锚点
+      const toc = buildToc(src);
+      tocListEl.innerHTML = "";
+      const heads = previewEl.querySelectorAll("h1,h2,h3,h4,h5,h6");
+      heads.forEach((h, i) => {
+        h.id = "h-" + i;
       });
+      // 按顺序对应（marked 不重排标题），点击滚动
+      let hi = 0;
+      for (const t of toc) {
+        const a = document.createElement("a");
+        a.href = "#";
+        a.textContent = t.text;
+        a.className = "lv" + Math.min(t.level, 3);
+        const targetIdx = Math.min(hi, heads.length - 1);
+        a.onclick = (e) => {
+          e.preventDefault();
+          if (targetIdx < heads.length) {
+            heads[targetIdx].scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+        };
+        tocListEl.appendChild(a);
+        hi++;
+      }
+      if (tocEl.style.display === "block") tocEl.style.display = toc.length ? "block" : "none";
+    }
+
+    function updateWordCount() {
+      const n = ta.value.replace(/\s/g, "").length;
+      wordCountEl.textContent = n + " 字";
+    }
+
+    function setPreviewMode(on) {
+      previewMode = on;
+      if (on) {
+        renderPreview();
+        ta.style.display = "none";
+        previewEl.style.display = "block";
+        toolbarEl.style.display = "none";
+        modeBtn.textContent = "✏️ 编辑";
+      } else {
+        previewEl.style.display = "none";
+        ta.style.display = "block";
+        toolbarEl.style.display = currentId !== null || ta.value ? "flex" : "none";
+        modeBtn.textContent = "👁 预览";
+      }
+    }
+    modeBtn.onclick = () => { if (previewMode) void flushSave(); setPreviewMode(!previewMode); };
+
+    // ---------- 时间格式化 ----------
+    function fmtDate(ts) {
+      const d = new Date(ts);
+      const now = new Date();
+      const sameDay =
+        d.getFullYear() === now.getFullYear() &&
+        d.getMonth() === now.getMonth() &&
+        d.getDate() === now.getDate();
+      const hm = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+      if (sameDay) return hm;
+      const sameYear = d.getFullYear() === now.getFullYear();
+      const md = (d.getMonth() + 1) + "/" + d.getDate();
+      return (sameYear ? md : d.getFullYear() + "/" + md) + " " + hm;
+    }
+    function groupLabel(ts) {
+      const d = new Date(ts);
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      if (ts >= startOfToday) return "今天";
+      if (ts >= startOfToday - 7 * 86400000) return "过去7天";
+      if (ts >= startOfToday - 30 * 86400000) return "过去30天";
+      return d.getFullYear() + "年" + (d.getMonth() + 1) + "月";
+    }
+
+    // ---------- 列表渲染 ----------
+    function renderList() {
+      groupsEl.innerHTML = "";
+      const q = filterText.toLowerCase();
+      const filtered = notes.filter(
+        (n) =>
+          !q ||
+          (n.title || "").toLowerCase().includes(q) ||
+          (n.preview || "").toLowerCase().includes(q),
+      );
+      if (filtered.length === 0) {
+        const tip = document.createElement("div");
+        tip.className = "empty-tip";
+        tip.textContent = q ? "没有匹配的笔记" : "还没有笔记，点右上「＋ 新建」";
+        groupsEl.appendChild(tip);
+        return;
+      }
+      let lastGroup = null;
+      for (const n of filtered) {
+        const g = groupLabel(n.updatedAt || 0);
+        if (g !== lastGroup) {
+          lastGroup = g;
+          const label = document.createElement("div");
+          label.className = "group-label";
+          label.textContent = g;
+          groupsEl.appendChild(label);
+        }
+        const item = document.createElement("div");
+        item.className = "note-item" + (n.id === currentId ? " active" : "");
+        const t = document.createElement("div");
+        t.className = "n-title";
+        t.textContent = n.title || "未命名笔记";
+        const dt = document.createElement("div");
+        dt.className = "n-date";
+        dt.textContent = fmtDate(n.updatedAt || 0);
+        const pv = document.createElement("div");
+        pv.className = "n-preview";
+        pv.textContent = n.preview || "（空笔记）";
+        item.append(t, dt, pv);
+        item.onclick = () => selectNote(n.id);
+        groupsEl.appendChild(item);
+      }
+    }
+
+    function setStatus(s) { statusEl.textContent = s; }
+    function markDirty() {
+      dirty = true;
+      saveStateEl.textContent = "未保存…";
+    }
+
+    // ---------- 选中 / 切换 ----------
+    async function selectNote(id) {
+      if (dirty) await flushSave();
+      const n = notes.find((x) => x.id === id);
+      if (!n) return;
+      try {
+        const content = await uTools.readFile("n-" + id + ".md").catch(() =>
+          uTools.readFile("n-" + id + ".txt").catch(() => ""));
+        currentId = id;
+        ta.disabled = false;
+        ta.value = content;
+        editorHead.style.display = "flex";
+        curTitleEl.textContent = n.title || "未命名笔记";
+        saveStateEl.textContent = "";
+        dirty = false;
+        restoreBtn.style.display = "inline-block";
+        setPreviewMode(false);
+        toolbarEl.style.display = "flex";
+        updateWordCount();
+        renderList();
+      } catch (e) {
+        setStatus("打开失败: " + (e.message || e));
+      }
+    }
+
+    function newNote(initial) {
+      if (dirty) { void flushSave(); return; }
+      currentId = null;
+      ta.disabled = false;
+      ta.value = initial || "";
+      editorHead.style.display = "flex";
+      curTitleEl.textContent = "新笔记";
+      saveStateEl.textContent = "";
+      dirty = false;
+      restoreBtn.style.display = "none";
+      setPreviewMode(false);
+      toolbarEl.style.display = "flex";
+      updateWordCount();
+      renderList();
+      ta.focus();
+    }
+
+    // ---------- 保存 ----------
+    function queueSave() {
+      // 空的新笔记不建条目
+      if (currentId === null && ta.value.trim() === "") return;
+      markDirty();
+      updateWordCount();
+      if (saveTimer) window.clearTimeout(saveTimer);
+      saveTimer = window.setTimeout(() => { saveTimer = null; void flushSave(); }, 400);
+    }
+
+    async function flushSave() {
+      if (saveTimer) { window.clearTimeout(saveTimer); saveTimer = null; }
+      if (currentId === null && ta.value.trim() === "") { dirty = false; return; }
+      if (saving) {
+        // 上一次保存还在途：排队再试一次，避免丢失本次改动
+        saveTimer = window.setTimeout(() => { saveTimer = null; void flushSave(); }, 300);
+        return;
+      }
+      saving = true;
+      dirty = false;
+      saveStateEl.textContent = "保存中…";
+      try {
+        // 新建时 id=null；main.js 会分配并回发 saved(带最终 id)
+        await uTools.sendMainMessage({ type: "save", id: currentId, content: ta.value });
+      } catch (e) {
+        dirty = true;
+        saveStateEl.textContent = "保存失败";
+        setStatus("保存失败: " + (e.message || e));
+      } finally {
+        saving = false;
+        if (!dirty) saveStateEl.textContent = "已保存 " + new Date().toLocaleTimeString();
+      }
+    }
+
+    // ---------- 删除 / 恢复 ----------
+    document.getElementById("delete").onclick = async () => {
+      if (!currentId) return;
+      if (!confirm("确定删除这篇笔记吗？（正文会备份到 .prev.md，可从数据目录找回）")) return;
+      try {
+        await uTools.sendMainMessage({ type: "delete", id: currentId });
+        currentId = null;
+        ta.disabled = true;
+        ta.value = "";
+        editorHead.style.display = "none";
+        restoreBtn.style.display = "none";
+        dirty = false;
+      } catch (e) {
+        setStatus("删除失败: " + (e.message || e));
+      }
+    };
+
+    restoreBtn.onclick = async () => {
+      if (!currentId) return;
+      if (!confirm("用上一版备份覆盖当前内容？（当前内容会先成为新的备份，可来回切换）")) return;
+      try {
+        await uTools.sendMainMessage({ type: "restore", id: currentId });
+      } catch (e) {
+        setStatus("恢复失败: " + (e.message || e));
+      }
+    };
+
+    document.getElementById("new").onclick = () => newNote("");
+
+    filterEl.addEventListener("input", () => {
+      filterText = filterEl.value.trim();
+      renderList();
     });
 
-    document.getElementById("save").onclick = () => {
-      uTools.sendMainMessage({ type: "save", content: ta.value });
-    };
+    // ---------- 工具条：对选区插入 Markdown 语法 ----------
+    function applyMarkdown(kind) {
+      const v = ta.value;
+      const s = ta.selectionStart;
+      const e = ta.selectionEnd;
+      const sel = v.slice(s, e);
+      let before = "", after = "", insert = null;
+      const lineStart = v.lastIndexOf("\n", s - 1) + 1;
 
-    document.getElementById("append").onclick = () => {
-      const line = "[备注] " + new Date().toLocaleString() + " — 来自详情视图消息桥";
-      uTools.sendMainMessage({ type: "append", content: (ta.value ? ta.value + "\n" : "") + line });
-      // main.js 落盘后会回发 appended，这里同时更新本地视图
-      ta.value = (ta.value ? ta.value + "\n" : "") + line;
-    };
+      switch (kind) {
+        case "bold": before = "**"; after = "**"; break;
+        case "italic": before = "*"; after = "*"; break;
+        case "underline": before = "<u>"; after = "</u>"; break;
+        case "strike": before = "~~"; after = "~~"; break;
+        case "code": before = "`"; after = "`"; break;
+        case "h1":
+          insert = "# " + (sel || "标题");
+          ta.setSelectionRange(s, e);
+          replaceRange(lineStart, e, insert + (e < v.length && v[e] !== "\n" ? "\n" : ""));
+          return;
+        case "h2":
+          insert = "## " + (sel || "标题");
+          replaceRange(lineStart, e, insert + (e < v.length && v[e] !== "\n" ? "\n" : ""));
+          return;
+        case "quote":
+          insert = sel ? sel.split("\n").map((l) => "> " + l).join("\n") : "> 引用";
+          replaceRange(s, e, insert);
+          return;
+        case "ul":
+          insert = sel ? sel.split("\n").map((l) => "- " + l).join("\n") : "- 列表项";
+          replaceRange(s, e, insert);
+          return;
+        case "ol":
+          insert = sel
+            ? sel.split("\n").map((l, i) => (i + 1) + ". " + l).join("\n")
+            : "1. 列表项";
+          replaceRange(s, e, insert);
+          return;
+        default: return;
+      }
+      const text = sel || "文本";
+      replaceRange(s, e, before + text + after);
+    }
+    function replaceRange(start, end, text) {
+      const v = ta.value;
+      ta.value = v.slice(0, start) + text + v.slice(end);
+      ta.setSelectionRange(start, start + text.length);
+      ta.focus();
+      queueSave();
+    }
+    toolbarEl.querySelectorAll(".tb-btn[data-md]").forEach((btn) => {
+      btn.onclick = () => {
+        const k = btn.dataset.md;
+        if (k === "toc") {
+          tocEl.style.display = tocEl.style.display === "block" ? "none" : "block";
+          if (tocEl.style.display === "block" && !previewMode) setPreviewMode(true);
+          return;
+        }
+        if (previewMode) setPreviewMode(false);
+        applyMarkdown(k);
+      };
+    });
 
+    // ---------- 列表自动续行 ----------
     ta.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
-        uTools.sendMainMessage({ type: "save", content: ta.value });
+        void flushSave();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "b") { e.preventDefault(); applyMarkdown("bold"); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key === "i") { e.preventDefault(); applyMarkdown("italic"); return; }
+      if (e.key === "Enter" && !e.shiftKey) {
+        const v = ta.value;
+        const s = ta.selectionStart;
+        const lineStart = v.lastIndexOf("\n", s - 1) + 1;
+        const line = v.slice(lineStart, s);
+        const m = line.match(/^(\s*)([-*+]\s+|\d+[.)]\s+|>\s+)(.*)$/);
+        if (m) {
+          e.preventDefault();
+          if (!m[3]) {
+            // 空列表项：回车结束列表（删掉前缀）
+            const ins = "";
+            ta.value = v.slice(0, lineStart) + v.slice(s);
+            ta.setSelectionRange(lineStart, lineStart);
+          } else {
+            let prefix = m[2];
+            const num = m[2].match(/^(\d+)([.)])\s+$/);
+            if (num) prefix = (parseInt(num[1], 10) + 1) + num[2] + " ";
+            const ins = "\n" + m[1] + prefix;
+            ta.value = v.slice(0, s) + ins + v.slice(s);
+            ta.setSelectionRange(s + ins.length, s + ins.length);
+          }
+          queueSave();
+        }
+      }
+    });
+    ta.addEventListener("input", queueSave);
+    ta.addEventListener("blur", () => { if (dirty) void flushSave(); });
+
+    // ---------- 与 main.js 的消息桥 ----------
+    uTools.onMainMessage((msg) => {
+      if (!msg || typeof msg !== "object") return;
+      if (msg.type === "list" && Array.isArray(msg.notes)) {
+        notes = msg.notes;
+        // 若当前打开的笔记已被外部删除，退回空态
+        if (currentId && !notes.some((n) => n.id === currentId)) {
+          currentId = null;
+          ta.disabled = true;
+          ta.value = "";
+          editorHead.style.display = "none";
+          restoreBtn.style.display = "none";
+          dirty = false;
+        }
+        renderList();
+      } else if (msg.type === "saved") {
+        if (currentId === null) currentId = msg.id; // 新建后拿到 id
+        else if (currentId && msg.id && currentId !== msg.id) currentId = msg.id;
+        dirty = false;
+        if (!saving) saveStateEl.textContent = "已保存 " + new Date(msg.at).toLocaleTimeString();
+        if (currentId) restoreBtn.style.display = "inline-block";
+      } else if (msg.type === "restored" && msg.id === currentId) {
+        ta.value = msg.content || "";
+        dirty = false;
+        saveStateEl.textContent = "已恢复上一版";
+        updateWordCount();
+        if (previewMode) renderPreview();
+      } else if (msg.type === "restore-error") {
+        setStatus(msg.error || "恢复失败");
+      } else if (msg.type === "save-error") {
+        dirty = true;
+        saveStateEl.textContent = "保存失败";
+        setStatus("保存失败: " + msg.error);
+      }
+    });
+
+    // ---------- 关闭保护（数据安全） ----------
+    // beforeClose 协商：宿主在关详情前会询问；dirty 时先同步 flush，
+    // 保存失败则拒绝关闭（让用户看到"保存失败"并可继续编辑）。
+    let closePromise = null;
+    uTools.onBeforeClose(async () => {
+      if (closePromise) return closePromise;
+      closePromise = (async () => {
+        if (dirty || saving) {
+          await flushSave();
+          if (dirty || saving) return false; // 保存失败 -> 拒绝关闭
+        }
+        return true;
+      })();
+      try {
+        return await closePromise;
+      } finally {
+        closePromise = null;
+      }
+    });
+    // 兜底：窗口 blur 隐藏很快，onDetailClose 再 flush 一次
+    uTools.onDetailClose(() => { void flushSave(); });
+
+    // ---------- 初始化 ----------
+    window.addEventListener("DOMContentLoaded", async () => {
+      const ctx = await uTools.getDetailContext();
+      const item = ctx && ctx.item ? ctx.item.data : null;
+
+      await uTools.sendMainMessage({ type: "list" });
+
+      if (item && item.action === "new" && item.value) {
+        // note <kw> 进入：直接起一篇新笔记，内容预填 kw
+        notes = [];
+        newNote(item.value);
+        setStatus("新笔记");
+      } else if (item && item.action === "open" && item.id) {
+        // 从搜索结果点开某篇：list 回来后选中它
+        const wait = setInterval(async () => {
+          if (notes.length > 0 || groupsEl.querySelector(".empty-tip")) {
+            clearInterval(wait);
+            void selectNote(item.id);
+          }
+        }, 50);
+        // 保险：list 回不来时 3 秒后也尝试
+        setTimeout(() => { clearInterval(wait); }, 3000);
+      } else {
+        setStatus("无上下文");
       }
     });
   </script>
