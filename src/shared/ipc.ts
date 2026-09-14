@@ -2,6 +2,7 @@
 
 export const Ipc = {
  LauncherHide: "launcher:hide",
+ LauncherToggleMaximize: "launcher:toggle-maximize",
  /** Run a search query. */
  SearchQuery: "search:query",
  /** Open/launch a file or app. */
@@ -40,6 +41,10 @@ export const Ipc = {
  PluginDetailReady: "plugin:detail-ready",
  /** Close the currently open detail view (plugin onExit fires). */
  PluginDetailClose: "plugin:detail-close",
+ /** Force-close the detail view without the beforeClose negotiation. */
+ PluginDetailCloseUnsafe: "plugin:detail-close-unsafe",
+ /** Top frame -> host: ask the detail iframe whether it allows closing. */
+ DetailBeforeClose: "plugin:detail-before-close",
  /** Detail view -> plugin main.js message. */
  PluginDetailSend: "plugin:detail-send",
  /** Read the detail-view context (keyword, selected item, plugin id). */
@@ -60,6 +65,20 @@ export const Ipc = {
  EvtDetailExit: "plugin:evt-detail-exit",
  /** main -> renderer: launcher shown (reset UI). */
  EvtLauncherShow: "launcher:show",
+
+ // --- detail view lifecycle negotiation (retention plan 阶段二/三) ---
+ /** Host -> detail frame: 请求检查未保存内容（beforeClose 协商）。 */
+ EvtDetailBeforeClose: "plugin:evt-detail-before-close",
+ /** Detail frame -> host: 是否允许关闭（true=允许 / false=拒绝继续编辑）。 */
+ DetailCloseResult: "plugin:detail-close-result",
+ /** Host -> detail frame: 窗口重新显示，恢复焦点与滚动位置。 */
+ EvtDetailResume: "plugin:evt-detail-resume",
+ /** Top frame -> host: 焦点/滚动快照，转发给 detail iframe 保存。 */
+ DetailSaveFocus: "plugin:detail-save-focus",
+
+ // --- search result context menu (右键定位) ---
+ /** Renderer -> main: 请求为搜索结果显示原生右键菜单。 */
+ ResultContextMenu: "result:context-menu",
 } as const;
 
 export type IpcChannel = (typeof Ipc)[keyof typeof Ipc];
@@ -95,6 +114,12 @@ export interface SearchResponse {
  calc?: { expression: string; result: string };
  /** Local file-index state (meaningful when Everything is absent). */
  fileIndex?: FileIndexStatus;
+ /**
+  * When true the renderer should render the apps section BEFORE the files
+  * section: the query matched installed applications, which is the
+  * primary intent; Everything file results are secondary context.
+  */
+ appsFirst?: boolean;
 }
 
 export interface FileIndexStatus {
@@ -190,5 +215,33 @@ export interface PluginSelectResult {
  openedDetail?: { pluginId: string; pluginName: string; detail: string };
  /** Set when a pure-command plugin handled the selection. */
  executed?: boolean;
+ error?: string;
+}
+
+// --- search result context menu (右键定位) ---
+
+/**
+ * Renderer -> main request to show a native context menu for a search result.
+ * Only the launcher top frame can call this; plugin iframes get window.uTools
+ * and cannot reach this channel.
+ */
+export interface ResultContextMenuRequest {
+ /** SearchItem type — main re-validates, does not trust renderer blindly. */
+ type: SearchItem["type"];
+ /** SearchItem payload (file path / .lnk path / shell: / everything: / ...). */
+ payload: string;
+ /** Display title for menu copy. */
+ title: string;
+ /** Pointer position for mouse-triggered menus (screen coords). Optional. */
+ x?: number;
+ y?: number;
+}
+
+/** main -> renderer result of the context menu interaction. */
+export interface ResultContextMenuResponse {
+ ok: boolean;
+ /** What the user chose (or dismissed). */
+ action?: "open" | "reveal" | "copy" | "dismissed";
+ /** User-facing error message (shown as toast). */
  error?: string;
 }

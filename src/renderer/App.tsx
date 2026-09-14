@@ -19,12 +19,19 @@ import {
 
 function buildFlat(res: SearchResponse): SearchItem[] {
   if (!res) return [];
-  return [
-    ...(res.commands ?? []),
-    ...(res.plugins ?? []),
-    ...(res.apps ?? []),
-    ...(res.files ?? []),
-  ];
+  // 优先级策略：
+  // - 普通搜索：命令（计算器/金额/Everything入口）→ 插件 → 文件 → 应用
+  // - 应用命中（appsFirst）：应用 → 插件 → 文件 → 命令
+  //   应用是用户主要意图，"在 Everything 中搜索"入口和计算结果降级到后面
+  const apps = res.apps ?? [];
+  const files = res.files ?? [];
+  const commands = res.commands ?? [];
+  const plugins = res.plugins ?? [];
+  const appFirst = res.appsFirst && apps.length > 0;
+  if (appFirst) {
+    return [...apps, ...plugins, ...files, ...commands];
+  }
+  return [...commands, ...plugins, ...files, ...apps];
 }
 
 interface DetailState {
@@ -112,6 +119,12 @@ export default function App() {
   const searchVersion = useRef(0);
   const resultsRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<number | null>(null);
+  // Mirror of the `detail` state for the onShow handler, which must not
+  // re-subscribe on every detail change (it is registered once at mount).
+  const detailRef = useRef<DetailState | null>(null);
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
 
   const showToast = useCallback((msg: string) => {
     if (!msg) return;
@@ -121,28 +134,39 @@ export default function App() {
   }, []);
 
   const openSettings = useCallback(() => {
-    window.launcher.getSettings().then((value) => {
-      setSettings(value);
-      setHotkeyDraft(value.hotkey);
-      document.documentElement.dataset.theme = value.theme;
-      setSettingsOpen(true);
-    }).catch(() => showToast("设置读取失败"));
+    window.launcher
+      .getSettings()
+      .then((value) => {
+        setSettings(value);
+        setHotkeyDraft(value.hotkey);
+        document.documentElement.dataset.theme = value.theme;
+        setSettingsOpen(true);
+      })
+      .catch(() => showToast("设置读取失败"));
   }, [showToast]);
 
-  const updateSettings = useCallback(async (patch: Partial<PublicSettings>) => {
-    if (!settings) return;
-    const next = { ...settings, ...patch };
-    await window.launcher.setSettings(patch);
-    setSettings(next);
-    document.documentElement.dataset.theme = next.theme;
-  }, [settings]);
+  const updateSettings = useCallback(
+    async (patch: Partial<PublicSettings>) => {
+      if (!settings) return;
+      const next = { ...settings, ...patch };
+      await window.launcher.setSettings(patch);
+      setSettings(next);
+      document.documentElement.dataset.theme = next.theme;
+    },
+    [settings],
+  );
 
   const saveHotkey = useCallback(async () => {
     const value = hotkeyDraft.trim();
     if (!value) return;
     const result = await window.launcher.setHotkey(value);
-    if (!result.ok) { showToast(result.error || "快捷键不可用"); return; }
-    setSettings((current) => current ? { ...current, hotkey: value } : current);
+    if (!result.ok) {
+      showToast(result.error || "快捷键不可用");
+      return;
+    }
+    setSettings((current) =>
+      current ? { ...current, hotkey: value } : current,
+    );
     showToast("快捷键已更新");
   }, [hotkeyDraft, showToast]);
 
@@ -162,11 +186,14 @@ export default function App() {
       })
       .catch(() => {});
     refreshPlugins();
-    window.launcher.getSettings().then((value) => {
-      setSettings(value);
-      setHotkeyDraft(value.hotkey);
-      document.documentElement.dataset.theme = value.theme;
-    }).catch(() => {});
+    window.launcher
+      .getSettings()
+      .then((value) => {
+        setSettings(value);
+        setHotkeyDraft(value.hotkey);
+        document.documentElement.dataset.theme = value.theme;
+      })
+      .catch(() => {});
   }, [refreshPlugins]);
 
   // Live file-index progress (background walk while the app runs).
@@ -175,8 +202,22 @@ export default function App() {
   }, []);
 
   // Hotkey pressed -> main sends 'launcher:show'; reset to a fresh search.
+  //
+  // EXCEPTION (editor-state retention plan): when a plugin detail view is
+  // open, the re-show must RESTORE it, not reset it. The detail state lives
+  // in the top frame (this component), the iframe itself is never reloaded,
+  // and the window keeps its expanded size — so the user's in-memory form
+  // state (password editor etc.) is exactly what the host preserved.
+  // Without this guard, setDetail(null) would unmount the iframe mid-edit
+  // and the unsaved form would be lost even though the host kept the
+  // window hidden-but-alive on blur.
   useEffect(() => {
     const off = window.launcher.onShow(() => {
+      const hadDetail = detailRef.current !== null;
+      if (hadDetail) {
+        // Detail view is alive: keep it mounted, only refocus the window.
+        return;
+      }
       searchVersion.current++;
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
       setLoading(false);
@@ -246,7 +287,8 @@ export default function App() {
         try {
           const res = await window.launcher.search(q);
           if (version !== searchVersion.current) return;
-          if (loadingTimerRef.current) window.clearTimeout(loadingTimerRef.current);
+          if (loadingTimerRef.current)
+            window.clearTimeout(loadingTimerRef.current);
           const newFlat = buildFlat(res);
           setFlat(newFlat);
           setSelected((prev) => (prev < newFlat.length ? prev : 0));
@@ -254,7 +296,8 @@ export default function App() {
           if (version === searchVersion.current)
             showToast("搜索失败，请重新输入后重试");
         } finally {
-          if (loadingTimerRef.current) window.clearTimeout(loadingTimerRef.current);
+          if (loadingTimerRef.current)
+            window.clearTimeout(loadingTimerRef.current);
           if (version === searchVersion.current) setLoading(false);
         }
       }, 120);
@@ -274,11 +317,18 @@ export default function App() {
     }
   };
 
-  const closeDetail = useCallback(() => {
+  // Close the detail view through the beforeClose negotiation. The host
+  // asks the plugin page whether it allows closing; a page with unsaved
+  // changes can refuse (it shows its own confirm dialog). If the page
+  // allows (or does not answer within the timeout), the host closes and
+  // sends EvtDetailExit, which this component listens to via onDetailExit
+  // to actually unmount the iframe.
+  const requestCloseDetail = useCallback(async () => {
     if (!detail) return;
-    setDetail(null);
-    window.launcher.detailClose();
-    requestAnimationFrame(() => inputRef.current?.focus());
+    await window.launcher.detailClose();
+    // If the page refused, detailClose returns { closed: false } and the
+    // iframe stays mounted. If it allowed, the host sends EvtDetailExit
+    // and onDetailExit unmounts it — no setDetail(null) needed here.
   }, [detail]);
 
   const launch = useCallback(
@@ -309,6 +359,33 @@ export default function App() {
         if (r.error) showToast(r.error);
       } catch {
         showToast("打开失败，请重试");
+      }
+    },
+    [showToast],
+  );
+
+  /**
+   * Show a native context menu for a search result (right-click / menu key).
+   * Only file, folder, and .lnk-app results get the menu; store apps,
+   * commands, plugins, and URLs are rejected by the main process.
+   */
+  const showContextMenu = useCallback(
+    async (item: SearchItem, x?: number, y?: number) => {
+      try {
+        const res = await window.launcher.showResultContextMenu({
+          type: item.type,
+          payload: item.payload,
+          title: item.title,
+          x,
+          y,
+        });
+        if (res.error) {
+          showToast(res.error);
+        } else if (res.action === "copy") {
+          showToast("已复制完整路径");
+        }
+      } catch {
+        showToast("菜单调用失败，请重试");
       }
     },
     [showToast],
@@ -345,6 +422,13 @@ export default function App() {
       searchVersion.current++;
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
       void window.launcher.hide();
+    } else if ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
+      // Shift+F10 or the keyboard Menu key: show the context menu for the
+      // currently selected result. The menu appears near the result list;
+      // the main process handles positioning relative to the window.
+      e.preventDefault();
+      const item = flat[selected];
+      if (item) void showContextMenu(item);
     }
   };
 
@@ -355,15 +439,16 @@ export default function App() {
   };
 
   // Esc in the parent frame while a detail view is open (iframe Esc is
-  // handled by the plugin-frame preload).
+  // handled by the plugin-frame preload). Both paths go through the
+  // beforeClose negotiation, so unsaved changes are confirmed first.
   useEffect(() => {
     if (!detail) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !perm) closeDetail();
+      if (e.key === "Escape" && !perm) void requestCloseDetail();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detail, closeDetail, perm]);
+  }, [detail, requestCloseDetail, perm]);
 
   const answerPerm = async (granted: boolean) => {
     if (!perm) return;
@@ -437,8 +522,15 @@ export default function App() {
             <Icon name={detail.pluginId} /> {detail.pluginName}
           </span>
           <button
+            className="detailbar-maximize"
+            onClick={() => void window.launcher.toggleMaximize()}
+            title="最大化 / 还原 (⊡)"
+          >
+            ⊡
+          </button>
+          <button
             className="detailbar-close"
-            onClick={closeDetail}
+            onClick={() => void requestCloseDetail()}
             title="关闭 (Esc)"
           >
             返回搜索 · Esc
@@ -499,7 +591,8 @@ export default function App() {
             composing.current = true;
             searchVersion.current++;
             if (debounceRef.current) window.clearTimeout(debounceRef.current);
-            if (loadingTimerRef.current) window.clearTimeout(loadingTimerRef.current);
+            if (loadingTimerRef.current)
+              window.clearTimeout(loadingTimerRef.current);
             setLoading(false);
           }}
           onCompositionEnd={(e) => {
@@ -534,19 +627,127 @@ export default function App() {
             <kbd>↵</kbd>
           </button>
         )}
-        <button className="settings-trigger" title="系统设置" aria-label="系统设置" onClick={openSettings}>⚙</button>
+        <button
+          className="settings-trigger"
+          title="系统设置"
+          aria-label="系统设置"
+          onClick={openSettings}
+        >
+          ⚙
+        </button>
       </div>
 
       {settingsOpen && settings && (
-        <div className="settings-backdrop" onMouseDown={() => setSettingsOpen(false)}>
-          <section className="settings-panel" role="dialog" aria-modal="true" aria-label="系统设置" onMouseDown={(e) => e.stopPropagation()}>
-            <header><div><span>系统设置</span><small>启动、外观与本地数据</small></div><button onClick={() => setSettingsOpen(false)}>×</button></header>
+        <div
+          className="settings-backdrop"
+          onMouseDown={() => setSettingsOpen(false)}
+        >
+          <section
+            className="settings-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="系统设置"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <header>
+              <div>
+                <span>系统设置</span>
+                <small>启动、外观与本地数据</small>
+              </div>
+              <button onClick={() => setSettingsOpen(false)}>×</button>
+            </header>
             <div className="settings-body">
-              <div className="settings-section"><h2>快捷键</h2><div className="settings-row"><div><strong>唤起应用</strong><small>例如 Alt+Space、Ctrl+Shift+Space</small></div><div className="hotkey-editor"><input value={hotkeyDraft} onChange={(e) => setHotkeyDraft(e.target.value)} /><button onClick={() => void saveHotkey()}>保存</button></div></div></div>
-              <div className="settings-section"><h2>通用</h2><label className="settings-row"><div><strong>开机自动启动</strong><small>登录 Windows 后在后台运行</small></div><input type="checkbox" checked={settings.launchAtLogin} onChange={(e) => void updateSettings({ launchAtLogin: e.target.checked })} /></label></div>
-              <div className="settings-section"><h2>外观</h2><div className="settings-row"><div><strong>颜色模式</strong><small>立即应用到主界面</small></div><select value={settings.theme} onChange={(e) => void updateSettings({ theme: e.target.value as PublicSettings["theme"] })}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></div></div>
-              <div className="settings-section"><h2>本地数据</h2><div className="settings-row"><div><strong>应用数据</strong><small>设置、插件和插件私有数据</small></div><button onClick={() => void window.launcher.revealData()}>打开目录</button></div><div className="settings-row"><div><strong>诊断日志</strong><small>自动轮转，不保存密码和剪贴板正文</small></div><button onClick={() => void window.launcher.revealLogs()}>打开日志</button></div></div>
-              <div className="settings-section"><h2>文件索引</h2><div className="settings-row"><div><strong>{info?.everythingAvailable ? "Everything 索引" : "本地索引"}</strong><small>{fileIndex ? `${fileIndex.count.toLocaleString()} 个文件${fileIndex.capped ? " · 已达上限" : fileIndex.running ? " · 正在建立" : ""}` : "正在读取状态"}</small></div></div></div>
+              <div className="settings-section">
+                <h2>快捷键</h2>
+                <div className="settings-row">
+                  <div>
+                    <strong>唤起应用</strong>
+                    <small>例如 Alt+Space、Ctrl+Shift+Space</small>
+                  </div>
+                  <div className="hotkey-editor">
+                    <input
+                      value={hotkeyDraft}
+                      onChange={(e) => setHotkeyDraft(e.target.value)}
+                    />
+                    <button onClick={() => void saveHotkey()}>保存</button>
+                  </div>
+                </div>
+              </div>
+              <div className="settings-section">
+                <h2>通用</h2>
+                <label className="settings-row">
+                  <div>
+                    <strong>开机自动启动</strong>
+                    <small>登录 Windows 后在后台运行</small>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.launchAtLogin}
+                    onChange={(e) =>
+                      void updateSettings({ launchAtLogin: e.target.checked })
+                    }
+                  />
+                </label>
+              </div>
+              <div className="settings-section">
+                <h2>外观</h2>
+                <div className="settings-row">
+                  <div>
+                    <strong>颜色模式</strong>
+                    <small>立即应用到主界面</small>
+                  </div>
+                  <select
+                    value={settings.theme}
+                    onChange={(e) =>
+                      void updateSettings({
+                        theme: e.target.value as PublicSettings["theme"],
+                      })
+                    }
+                  >
+                    <option value="system">跟随系统</option>
+                    <option value="light">浅色</option>
+                    <option value="dark">深色</option>
+                  </select>
+                </div>
+              </div>
+              <div className="settings-section">
+                <h2>本地数据</h2>
+                <div className="settings-row">
+                  <div>
+                    <strong>应用数据</strong>
+                    <small>设置、插件和插件私有数据</small>
+                  </div>
+                  <button onClick={() => void window.launcher.revealData()}>
+                    打开目录
+                  </button>
+                </div>
+                <div className="settings-row">
+                  <div>
+                    <strong>诊断日志</strong>
+                    <small>自动轮转，不保存密码和剪贴板正文</small>
+                  </div>
+                  <button onClick={() => void window.launcher.revealLogs()}>
+                    打开日志
+                  </button>
+                </div>
+              </div>
+              <div className="settings-section">
+                <h2>文件索引</h2>
+                <div className="settings-row">
+                  <div>
+                    <strong>
+                      {info?.everythingAvailable
+                        ? "Everything 索引"
+                        : "本地索引"}
+                    </strong>
+                    <small>
+                      {fileIndex
+                        ? `${fileIndex.count.toLocaleString()} 个文件${fileIndex.capped ? " · 已达上限" : fileIndex.running ? " · 正在建立" : ""}`
+                        : "正在读取状态"}
+                    </small>
+                  </div>
+                </div>
+              </div>
             </div>
           </section>
         </div>
@@ -722,7 +923,19 @@ export default function App() {
                 onMouseEnter={() => setSelected(i)}
                 onMouseDown={(e) => {
                   e.preventDefault();
+                  // Only left button opens the result; right button is
+                  // handled by onContextMenu below. Without this guard a
+                  // right-click would both open the file AND show the menu.
+                  if (e.button !== 0) return;
                   void launch(item);
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  // Select this row so the menu acts on what the user
+                  // right-clicked, not the previously keyboard-selected row.
+                  setSelected(i);
+                  void showContextMenu(item, e.clientX, e.clientY);
                 }}
               >
                 {item.iconUrl ? (

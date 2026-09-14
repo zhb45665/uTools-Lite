@@ -1,22 +1,39 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { ipcMain, app, clipboard, dialog } from "electron";
-import { Ipc, SearchItem, CapabilityCall, PublicSettings } from "../shared/ipc";
+import {
+  ipcMain,
+  app,
+  clipboard,
+  dialog,
+  Menu,
+  shell,
+  BrowserWindow,
+} from "electron";
+import {
+  Ipc,
+  SearchItem,
+  CapabilityCall,
+  PublicSettings,
+  ResultContextMenuRequest,
+  ResultContextMenuResponse,
+} from "../shared/ipc";
 import { SettingsStore } from "./store";
 import { registerHotkey, getCurrentHotkey } from "./hotkey";
 import {
-  showLauncher,
   hideLauncher,
   suspendBlurHide,
   resumeBlurHide,
   toggleLauncher,
+  toggleMaximize,
 } from "./launcher-window";
 import { runSearch } from "./search";
-import { detectEverything, openLocalEverything } from "./file-index/everything-cli";
+import {
+  detectEverything,
+  openLocalEverything,
+} from "./file-index/everything-cli";
 import { getAppCount } from "./file-index/app-index";
 import { getIndexStatus } from "./file-index/local-index";
-import { shell } from "electron";
 import { PluginManager } from "./plugins/manager";
 import { logsDirectory, log } from "./logger";
 
@@ -44,8 +61,13 @@ export function registerIpc(
   onHotkeyChanged: () => void,
 ): void {
   ipcMain.handle(Ipc.LauncherHide, () => {
-    pm.closeDetail(true);
+    // Esc in the search UI: hide the window. If a detail view happens to be
+    // open (edge case), it stays alive per the retention plan; the user
+    // resumes it next time the launcher is shown.
     hideLauncher();
+  });
+  ipcMain.handle(Ipc.LauncherToggleMaximize, () => {
+    toggleMaximize();
   });
   ipcMain.handle(Ipc.SearchQuery, async (_e, query: string) => {
     return runSearch(query ?? "");
@@ -116,6 +138,178 @@ export function registerIpc(
     },
   );
 
+  // --- search result context menu (右键定位) ---
+  //
+  // Renderer sends the SearchItem type + payload + title (+ optional
+  // pointer coords). Main re-validates the path (does NOT trust the
+  // renderer's type), builds a native Menu, suspends blur-hide for the
+  // menu's lifetime, and executes the chosen action.
+  ipcMain.handle(
+    Ipc.ResultContextMenu,
+    async (
+      _e,
+      req: ResultContextMenuRequest,
+    ): Promise<ResultContextMenuResponse> => {
+      // 1. Validate payload format — reject non-local-path protocols.
+      const payload = typeof req?.payload === "string" ? req.payload : "";
+      if (!payload) return { ok: false, error: "该结果没有可打开的本地位置" };
+      if (payload.includes("\0"))
+        return { ok: false, error: "路径包含非法字符" };
+      if (
+        payload.startsWith("http://") ||
+        payload.startsWith("https://") ||
+        payload.startsWith("everything:") ||
+        payload.startsWith("shell:")
+      ) {
+        return { ok: false, error: "该结果没有可打开的本地位置" };
+      }
+      if (!path.isAbsolute(payload)) {
+        return { ok: false, error: "该结果没有可打开的本地位置" };
+      }
+
+      // 2. Existence check — the file may have been moved/deleted since search.
+      let st: fs.Stats;
+      try {
+        st = fs.statSync(payload);
+      } catch {
+        return { ok: false, error: "找不到该文件，可能已被移动或删除" };
+      }
+
+      // 3. Determine kind: directory / .lnk shortcut / regular file.
+      const isDir = st.isDirectory();
+      const isLnk = !isDir && path.extname(payload).toLowerCase() === ".lnk";
+      const isFile = !isDir && !isLnk;
+
+      // 4. Build the menu items based on kind.
+      const menuItems: Electron.MenuItemConstructorOptions[] = [];
+
+      if (isDir) {
+        menuItems.push({
+          label: "打开文件夹",
+          click: () => {
+            void doOpen(payload);
+          },
+        });
+        menuItems.push({
+          label: "在资源管理器中显示",
+          click: () => {
+            void doReveal(payload);
+          },
+        });
+      } else if (isLnk) {
+        menuItems.push({
+          label: "启动应用",
+          click: () => {
+            void doOpen(payload);
+          },
+        });
+        menuItems.push({
+          label: "打开快捷方式所在位置",
+          click: () => {
+            void doReveal(payload);
+          },
+        });
+      } else if (isFile) {
+        menuItems.push({
+          label: "打开",
+          click: () => {
+            void doOpen(payload);
+          },
+        });
+        menuItems.push({
+          label: "打开文件所在位置",
+          click: () => {
+            void doReveal(payload);
+          },
+        });
+      } else {
+        return { ok: false, error: "该结果没有可打开的本地位置" };
+      }
+      menuItems.push({ type: "separator" });
+      const copyLabel = isLnk ? "复制快捷方式路径" : "复制完整路径";
+      menuItems.push({
+        label: copyLabel,
+        click: () => {
+          void doCopy(payload);
+        },
+      });
+
+      // 5. Show the native menu. Suspend blur-hide for the menu's lifetime
+      //    so the launcher window is not hidden while the menu is open.
+      const sender = _e.sender;
+      const win = BrowserWindow.fromWebContents(sender);
+      if (!win || win.isDestroyed()) return { ok: false, error: "窗口不可用" };
+
+      suspendBlurHide();
+      let resumed = false;
+      const ensureResume = () => {
+        if (!resumed) {
+          resumed = true;
+          resumeBlurHide();
+        }
+      };
+
+      // --- action helpers (close over `win`) ---
+      let lastAction: "open" | "reveal" | "copy" | "dismissed" = "dismissed";
+
+      async function doOpen(p: string) {
+        try {
+          const err = await shell.openPath(p);
+          if (err) return;
+          lastAction = "open";
+          hideLauncher();
+        } catch {
+          lastAction = "open";
+        }
+      }
+      function doReveal(p: string) {
+        try {
+          shell.showItemInFolder(p);
+          lastAction = "reveal";
+        } catch {
+          lastAction = "reveal";
+        }
+      }
+      function doCopy(p: string) {
+        try {
+          clipboard.writeText(p);
+          lastAction = "copy";
+        } catch {
+          lastAction = "copy";
+        }
+      }
+
+      try {
+        const menu = Menu.buildFromTemplate(menuItems);
+        const pos =
+          typeof req.x === "number" && typeof req.y === "number"
+            ? { x: req.x, y: req.y }
+            : undefined;
+        menu.popup({ window: win, ...(pos ? { x: pos.x, y: pos.y } : {}) });
+
+        // Wait for the menu to close (action chosen or dismissed).
+        await new Promise<void>((resolve) => {
+          const onWillClose = () => {
+            ensureResume();
+            resolve();
+          };
+          menu.on("menu-will-close", onWillClose);
+          // Safety net: if the event never fires, resume after 10 s so we
+          // don't leak the suspend count. (The menu is always closed by the
+          // user or by Electron, so this is a defensive guard only.)
+          setTimeout(() => {
+            ensureResume();
+            resolve();
+          }, 10_000);
+        });
+        return { ok: true, action: lastAction };
+      } catch (err) {
+        ensureResume();
+        return { ok: false, error: String(err) };
+      }
+    },
+  );
+
   ipcMain.handle(Ipc.AppInfo, async () => {
     const everythingAvailable = await detectEverything();
     return {
@@ -145,18 +339,22 @@ export function registerIpc(
     };
   });
 
-  ipcMain.handle(Ipc.SettingsGet, (): PublicSettings => ({
-    hotkey: getCurrentHotkey() ?? store.get("hotkey"),
-    launchAtLogin: store.get("launchAtLogin"),
-    theme: store.get("theme"),
-  }));
+  ipcMain.handle(
+    Ipc.SettingsGet,
+    (): PublicSettings => ({
+      hotkey: getCurrentHotkey() ?? store.get("hotkey"),
+      launchAtLogin: store.get("launchAtLogin"),
+      theme: store.get("theme"),
+    }),
+  );
 
   ipcMain.handle(Ipc.SettingsSet, (_e, patch: Partial<PublicSettings>) => {
     if (typeof patch?.launchAtLogin === "boolean") {
       store.set("launchAtLogin", patch.launchAtLogin);
       app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin });
     }
-    if (["system", "light", "dark"].includes(String(patch?.theme))) store.set("theme", patch.theme!);
+    if (["system", "light", "dark"].includes(String(patch?.theme)))
+      store.set("theme", patch.theme!);
     log("INFO", "settings", "settings updated");
     return { ok: true };
   });
@@ -228,9 +426,31 @@ export function registerIpc(
     return { ok: true };
   });
 
-  ipcMain.handle(Ipc.PluginDetailClose, () => {
-    pm.closeDetail(true);
+  ipcMain.handle(Ipc.PluginDetailClose, async () => {
+    // Goes through the beforeClose negotiation: a page with unsaved changes
+    // can refuse (it shows its own confirm dialog and returns false).
+    const r = await pm.closeDetail(true);
+    return { ok: true, closed: r.closed };
+  });
+
+  ipcMain.handle(Ipc.PluginDetailCloseUnsafe, () => {
+    pm.closeDetailUnsafe(true);
     return { ok: true };
+  });
+
+  /**
+   * Top frame asks the detail iframe whether it allows closing.
+   * Re-uses the manager's negotiation (which sends to the frame directly)
+   * but returns the answer to the top frame. The top frame's own Esc /
+   * close-button path calls detailClose() which triggers the same flow
+   * via PluginDetailClose, so this handler is only used when the top frame
+   * wants to check without closing (e.g. for diagnostics).
+   */
+  ipcMain.handle(Ipc.DetailBeforeClose, async () => {
+    const pmRef = pm;
+    const d = pmRef.activeDetailRef();
+    if (!d) return true;
+    return pmRef.negotiateBeforeClosePublic(d);
   });
 
   ipcMain.handle(Ipc.PluginDetailSend, (e, data: unknown) => {
@@ -240,6 +460,10 @@ export function registerIpc(
 
   ipcMain.handle(Ipc.PluginDetailContext, () => {
     return pm.detailContext();
+  });
+
+  ipcMain.handle(Ipc.DetailSaveFocus, (_e, state: unknown) => {
+    pm.saveFocusState(state);
   });
 
   ipcMain.handle(

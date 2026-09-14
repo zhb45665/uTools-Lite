@@ -6,21 +6,26 @@ let win: BrowserWindow | null = null;
 let store: SettingsStore;
 let isPreload = true;
 let blurSuspended = 0; // ref-counted: native dialogs would otherwise blur-hide the window
+let onExternalSuspend: (() => number) | null = null;
 let credentialOriginalSize: [number, number] | null = null;
 
 /** Expand the credential workspace and restore the compact launcher on exit. */
 export function setCredentialWindow(expanded: boolean): void {
   if (!win || win.isDestroyed()) return;
-  if (expanded && !credentialOriginalSize) credentialOriginalSize = win.getContentSize() as [number, number];
+  if (expanded && !credentialOriginalSize)
+    credentialOriginalSize = win.getContentSize() as [number, number];
   if (!expanded && !credentialOriginalSize) return;
   const area = screen.getDisplayMatching(win.getBounds()).workArea;
   const desired = expanded ? [1000, 700] : credentialOriginalSize!;
   // Store/restore content dimensions; outer dimensions include rounded Windows borders.
-  const width = Math.min(desired[0], area.width - 2), height = Math.min(desired[1], area.height - 2);
+  const width = Math.min(desired[0], area.width - 2),
+    height = Math.min(desired[1], area.height - 2);
   win.setContentSize(width, height);
   const bounds = win.getBounds();
-  win.setPosition(Math.max(area.x, Math.min(bounds.x, area.x + area.width - bounds.width)),
-    Math.max(area.y, Math.min(bounds.y, area.y + area.height - bounds.height)));
+  win.setPosition(
+    Math.max(area.x, Math.min(bounds.x, area.x + area.width - bounds.width)),
+    Math.max(area.y, Math.min(bounds.y, area.y + area.height - bounds.height)),
+  );
   if (!expanded) credentialOriginalSize = null;
 }
 
@@ -55,11 +60,14 @@ export function createLauncherWindow(settings: SettingsStore): void {
     useContentSize: true,
     show: false,
     frame: false,
+    // Start transparent for the compact launcher (rounded card on desktop).
+    // The maximize path toggles this off for a solid full-screen surface —
+    // transparent windows can't be reliably maximized on Windows.
     transparent: true,
     resizable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
-    fullscreenable: false,
+    fullscreenable: true,
     hasShadow: false,
     backgroundColor: "#00000000",
     webPreferences: {
@@ -90,16 +98,31 @@ export function createLauncherWindow(settings: SettingsStore): void {
   win.setAlwaysOnTop(true, "screen-saver");
   win.loadFile(rendererUrl());
 
+  // Don't persist rememberSize while maximized: restoring would lock the
+  // launcher into full-screen on next show. The blur handler already skips
+  // persistence when credentialOriginalSize is set; do the same here.
   win.on("blur", () => {
-    if (blurSuspended > 0) return; // dialog open: stay visible
-    // Hide when focus is lost, like Spotlight / uTools.
-    if (win && !win.isDestroyed()) {
-      onWindowBlur?.(); // restore the compact size before persisting it
-      // Save size before hiding.
+    if (effectiveBlurSuspended() > 0) return; // dialog / permission card open: stay visible
+    // Hide when focus is lost, like Spotlight / uTools. The detail view is
+    // intentionally NOT closed here: blur is a temporary departure, and the
+    // password editor (and other long-form plugin pages) must survive it.
+    // Explicit close paths (Esc / close button / plugin switch) still go
+    // through PluginManager.closeDetail().
+    //
+    // Do not persist rememberSize while the window is in the expanded
+    // credential workspace: the compact launcher size must not be replaced
+    // by the 1000x700 detail size (risk 12.3). credentialOriginalSize
+    // already holds the pre-detail size and is restored on explicit close.
+    if (
+      win &&
+      !win.isDestroyed() &&
+      !credentialOriginalSize &&
+      !win.isMaximized()
+    ) {
       const [w, h] = win.getContentSize();
       store.set("rememberSize", { width: w, height: h });
-      win.hide();
     }
+    if (win && !win.isDestroyed()) win.hide();
   });
 
   win.webContents.on("did-finish-load", () => {
@@ -120,11 +143,24 @@ function positionOnCursorDisplay(w: BrowserWindow): void {
 
 export function showLauncher(): void {
   if (!win || win.isDestroyed()) return;
-  setCredentialWindow(false);
+  // Do NOT call setCredentialWindow(false) here: a re-show must restore the
+  // editor the user left, at the expanded size. The compact size is only
+  // restored by an explicit detail close (PluginDetailClose / Esc / close
+  // button), which goes through closeDetail().
   positionOnCursorDisplay(win);
   win.show();
   win.focus();
   win.webContents.send("launcher:show");
+  // Ask the plugin manager to resume the active detail view (focus/scroll).
+  // The manager only sends the frame-targeted event when a detail is open.
+  onLauncherShown?.();
+}
+
+/** Hook: called after the launcher window is shown (used to resume details). */
+let onLauncherShown: (() => void) | null = null;
+
+export function setLauncherShownHook(fn: (() => void) | null): void {
+  onLauncherShown = fn;
 }
 
 export function hideLauncher(): void {
@@ -135,6 +171,28 @@ export function toggleLauncher(): void {
   if (!win || win.isDestroyed()) return;
   if (win.isVisible()) hideLauncher();
   else showLauncher();
+}
+
+/**
+ * Toggle maximize / restore for the launcher window.
+ * Electron 28 cannot change transparency at runtime, so the window keeps
+ * its transparent flag; the solid look comes from the renderer background
+ * (CSS --bg) plus a matching setBackgroundColor as a fallback for the few
+ * pixels of native chrome that are not covered by the DOM. The maximize
+ * itself fills the work area, which is the "full-screen" feel the user
+ * wants (no separate F11-style fullscreen API is needed for this).
+ */
+export function toggleMaximize(): void {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMaximized()) {
+    win.unmaximize();
+  } else {
+    win.maximize();
+  }
+}
+
+export function isMaximized(): boolean {
+  return !!win && !win.isDestroyed() && win.isMaximized();
 }
 
 export function isLauncherVisible(): boolean {
@@ -157,17 +215,49 @@ export function isWindowPreloaded(): boolean {
  * Temporarily disable blur-hide (ref-counted). Needed before opening native
  * dialogs: a modal dialog blurs the window and would hide it (pitfall §16.2-5).
  */
-export function suspendBlurHide(): void {
+export function suspendBlurHide(): number {
+  const wasSuspended = blurSuspended;
   blurSuspended++;
+  return wasSuspended; // 0 -> this call is what suspends blur-hide
 }
 
 export function resumeBlurHide(): void {
   blurSuspended = Math.max(0, blurSuspended - 1);
 }
 
-/** Tell the plugin manager a detail view was visible and the window blurred. */
+/** Tell the plugin manager a detail view was visible and the window blurred.
+ *  Retained for API compatibility; the blur handler no longer closes the
+ *  detail (retention plan 阶段一), so the handler is now a no-op sink that
+ *  only records activity. index.ts still registers it. */
 let onWindowBlur: (() => void) | null = null;
 
 export function setWindowBlurHandler(fn: (() => void) | null): void {
   onWindowBlur = fn;
+  void onWindowBlur; // keep the variable alive for future re-wiring
+}
+
+/**
+ * Register a callback that participates in blur-hide suspension from
+ * outside the window module (e.g. a permission card that must stay on
+ * screen to be answered). Returns the current external suspend count.
+ */
+export function setBlurSuspendProbe(fn: (() => number) | null): void {
+  onExternalSuspend = fn;
+}
+
+/**
+ * Total blur-hide suspension: window-local dialog locks plus external
+ * locks (permission cards). A probe failure must not break blur handling.
+ */
+function effectiveBlurSuspended(): number {
+  let total = blurSuspended;
+  if (onExternalSuspend) {
+    try {
+      const n = onExternalSuspend();
+      if (typeof n === "number" && n > 0) total += n;
+    } catch {
+      /* ignore */
+    }
+  }
+  return total;
 }

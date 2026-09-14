@@ -10,6 +10,8 @@ import {
   PermissionRequest,
   DetailContext,
   PublicSettings,
+  ResultContextMenuRequest,
+  ResultContextMenuResponse,
 } from "../shared/ipc";
 
 /**
@@ -38,6 +40,10 @@ const launcherApi = {
   hide(): Promise<void> {
     return ipcRenderer.invoke(Ipc.LauncherHide);
   },
+  /** Toggle window maximize / restore (full-screen-like for the detail view). */
+  toggleMaximize(): Promise<void> {
+    return ipcRenderer.invoke(Ipc.LauncherToggleMaximize);
+  },
   search(query: string): Promise<SearchResponse> {
     return ipcRenderer.invoke(
       Ipc.SearchQuery,
@@ -52,6 +58,19 @@ const launcherApi = {
       error?: string;
       copied?: string;
     }>;
+  },
+  /**
+   * Show a native context menu for a search result (right-click / menu key).
+   * The main process validates the path and builds the menu; the renderer
+   * never sees Electron's Menu or shell directly.
+   */
+  showResultContextMenu(
+    req: ResultContextMenuRequest,
+  ): Promise<ResultContextMenuResponse> {
+    return ipcRenderer.invoke(
+      Ipc.ResultContextMenu,
+      req,
+    ) as Promise<ResultContextMenuResponse>;
   },
   appInfo(): Promise<AppInfo> {
     return ipcRenderer.invoke(Ipc.AppInfo) as Promise<AppInfo>;
@@ -69,13 +88,21 @@ const launcherApi = {
     return ipcRenderer.invoke(Ipc.SettingsGet) as Promise<PublicSettings>;
   },
   setSettings(settings: Partial<PublicSettings>): Promise<{ ok: boolean }> {
-    return ipcRenderer.invoke(Ipc.SettingsSet, settings) as Promise<{ ok: boolean }>;
+    return ipcRenderer.invoke(Ipc.SettingsSet, settings) as Promise<{
+      ok: boolean;
+    }>;
   },
   revealData(): Promise<{ ok: boolean; error?: string }> {
-    return ipcRenderer.invoke(Ipc.DataReveal) as Promise<{ ok: boolean; error?: string }>;
+    return ipcRenderer.invoke(Ipc.DataReveal) as Promise<{
+      ok: boolean;
+      error?: string;
+    }>;
   },
   revealLogs(): Promise<{ ok: boolean; error?: string }> {
-    return ipcRenderer.invoke(Ipc.LogsReveal) as Promise<{ ok: boolean; error?: string }>;
+    return ipcRenderer.invoke(Ipc.LogsReveal) as Promise<{
+      ok: boolean;
+      error?: string;
+    }>;
   },
   quit(): Promise<{ ok: boolean }> {
     return ipcRenderer.invoke(Ipc.AppQuit) as Promise<{ ok: boolean }>;
@@ -134,8 +161,17 @@ const launcherApi = {
       ok: boolean;
     }>;
   },
+  /** Close the current detail view. Performs the beforeClose negotiation
+   *  (unsaved-changes check inside the plugin page) before the host
+   *  actually closes it. Use detailCloseUnsafe() for force-close. */
   detailClose(): Promise<{ ok: boolean }> {
     return ipcRenderer.invoke(Ipc.PluginDetailClose) as Promise<{
+      ok: boolean;
+    }>;
+  },
+  /** Force-close the detail view without the beforeClose negotiation. */
+  detailCloseUnsafe(): Promise<{ ok: boolean }> {
+    return ipcRenderer.invoke(Ipc.PluginDetailCloseUnsafe) as Promise<{
       ok: boolean;
     }>;
   },
@@ -191,6 +227,54 @@ const launcherApi = {
       ipcRenderer.removeListener(Ipc.FileIndexProgress, listener);
     };
   },
+  /**
+   * Ask the detail frame whether it allows closing (retention plan 阶段二).
+   * The top frame forwards the request to the plugin iframe and waits for
+   * its answer; a frame that does not answer within the timeout is treated
+   * as allowing close (safe policy, logged by the host).
+   */
+  detailBeforeClose(): Promise<boolean> {
+    void askBeforeCloseInTop();
+    return ipcRenderer.invoke(Ipc.DetailBeforeClose) as Promise<boolean>;
+  },
+  /** Host says the window is showing again: restore focus/scroll state. */
+  onDetailResume(cb: () => void): () => void {
+    const listener = () => cb();
+    ipcRenderer.on(Ipc.EvtDetailResume, listener);
+    return () => {
+      ipcRenderer.removeListener(Ipc.EvtDetailResume, listener);
+    };
+  },
+  /**
+   * Snapshot the focused field / caret / scroll position in the top frame
+   * and push it to the detail iframe, which stores it for the next resume.
+   */
+  detailSaveFocus(): void {
+    try {
+      const el = document.activeElement as HTMLElement | null;
+      const frame = document.querySelector(
+        "iframe.detail-frame",
+      ) as HTMLIFrameElement | null;
+      const state = {
+        fieldId: el && el.id ? el.id : null,
+        selStart:
+          el && "selectionStart" in el
+            ? (el as HTMLInputElement).selectionStart
+            : null,
+        selEnd:
+          el && "selectionEnd" in el
+            ? (el as HTMLInputElement).selectionEnd
+            : null,
+        bodyTop: document.body.scrollTop || 0,
+        bodyLeft: document.body.scrollLeft || 0,
+        frameTop: frame ? frame.scrollTop : 0,
+        frameLeft: frame ? frame.scrollLeft : 0,
+      };
+      ipcRenderer.send(Ipc.DetailSaveFocus, state);
+    } catch {
+      /* focus snapshot is best-effort */
+    }
+  },
 };
 
 export type LauncherApi = typeof launcherApi;
@@ -222,11 +306,41 @@ const uToolsApi = {
       ok: boolean;
     }>;
   },
-  /** Close this detail view (host fires main.js onExit). */
-  closeDetail(): Promise<{ ok: boolean }> {
+  /** Close this detail view. Runs the page's save hooks first, then asks
+   *  the host to perform the beforeClose negotiation (unsaved-changes
+   *  check) before actually closing. Returns { closed: false } when the
+   *  page denied the close (e.g. the user chose "继续编辑"). */
+  closeDetail(): Promise<{ closed: boolean }> {
+    void runBeforeUnload();
     return ipcRenderer.invoke(Ipc.PluginDetailClose) as Promise<{
-      ok: boolean;
+      closed: boolean;
     }>;
+  },
+  /**
+   * Register a hook invoked when the host asks whether the detail view may
+   * be closed (retention plan 阶段二). Return true to allow, false to keep
+   * editing. The host applies a short timeout: an unanswered page is
+   * closed anyway (safe policy, logged). Returns unsubscribe.
+   */
+  onBeforeClose(cb: () => boolean | Promise<boolean>): () => void {
+    beforeCloseHandlers.push(cb);
+    return () => {
+      const i = beforeCloseHandlers.indexOf(cb);
+      if (i >= 0) beforeCloseHandlers.splice(i, 1);
+    };
+  },
+  /**
+   * Register an async save hook invoked right before the detail view
+   * disappears (Esc / window blur). Windows blur-hide in a few ms, so a
+   * debounced autosave that has not fired yet would be lost otherwise.
+   * Returns unsubscribe.
+   */
+  onDetailClose(cb: () => unknown): () => void {
+    beforeUnloadHandlers.push(cb);
+    return () => {
+      const i = beforeUnloadHandlers.indexOf(cb);
+      if (i >= 0) beforeUnloadHandlers.splice(i, 1);
+    };
   },
 
   // --- capabilities (all gated by the manifest permission model)
@@ -242,6 +356,9 @@ const uToolsApi = {
     path: string,
   ): Promise<{ entries: { name: string; dir: boolean; size: number }[] }> {
     return callCapability("fs.list", { path });
+  },
+  deleteFile(path: string): Promise<{ ok: true }> {
+    return callCapability("fs.delete", { path });
   },
   getClipboardText(): Promise<string> {
     return callCapability("clipboard.read", {}).then((r) => r.text as string);
@@ -290,6 +407,91 @@ const uToolsApi = {
   },
 };
 
+const beforeUnloadHandlers: Array<() => unknown> = [];
+const beforeCloseHandlers: Array<() => boolean | Promise<boolean>> = [];
+
+/**
+ * Ask every page hook (in the TOP frame) whether the view may close.
+ * Kept symmetric with the plugin-frame askBeforeClose() so the same API
+ * shape exists on both sides; the top frame has no page hooks of its own.
+ */
+async function askBeforeCloseInTop(): Promise<boolean> {
+  return true;
+}
+
+/** Ask every page hook whether the view may close. Default: allow. */
+async function askBeforeClose(): Promise<boolean> {
+  for (const cb of [...beforeCloseHandlers]) {
+    try {
+      const allow = await cb();
+      if (allow === false) return false;
+    } catch {
+      /* a failing check must not block closing */
+    }
+  }
+  return true;
+}
+
+/** Run every page-registered save hook; failures must not block closing. */
+async function runBeforeUnload(): Promise<void> {
+  for (const cb of [...beforeUnloadHandlers]) {
+    try {
+      await cb();
+    } catch {
+      /* a failing save must not keep the user in the detail view */
+    }
+  }
+}
+
+// Focus / scroll state saved by the top frame before the window hides.
+let savedFocusState: Record<string, unknown> | null = null;
+
+if (location.protocol === "plugin:") {
+  ipcRenderer.on(Ipc.DetailSaveFocus, (_e, state: Record<string, unknown>) => {
+    savedFocusState = state ?? null;
+  });
+  // The host tells us the window is visible again: restore focus / caret /
+  // scroll on the next frame (the window must be visible first, otherwise
+  // focus() is a no-op on Windows).
+  ipcRenderer.on(Ipc.EvtDetailResume, () => {
+    const state = savedFocusState;
+    savedFocusState = null;
+    if (!state) return;
+    requestAnimationFrame(() => {
+      try {
+        const body = document.body;
+        if (typeof state.frameTop === "number") body.scrollTop = state.frameTop;
+        if (typeof state.frameLeft === "number")
+          body.scrollLeft = state.frameLeft;
+        const id = state.fieldId as string | null;
+        if (!id) return;
+        const el = document.getElementById(id) as HTMLElement | null;
+        if (!el) return;
+        el.focus();
+        const selStart = state.selStart as number | null;
+        const selEnd = state.selEnd as number | null;
+        if (
+          el instanceof HTMLInputElement ||
+          el instanceof HTMLTextAreaElement
+        ) {
+          if (typeof selStart === "number" && typeof selEnd === "number") {
+            try {
+              el.setSelectionRange(
+                Math.min(selStart, el.value.length),
+                Math.min(selEnd, el.value.length),
+              );
+            } catch {
+              /* selection may be invalid mid-edit */
+            }
+          }
+        }
+      } catch {
+        /* resume is best-effort */
+      }
+    });
+  });
+}
+
 async function callCapability(
   method: string,
   params: Record<string, unknown>,
@@ -332,11 +534,18 @@ const isTopFrame =
 
 if (location.protocol === "plugin:") {
   // Esc inside the detail frame closes the view (acceptance: Esc -> 搜索态).
+  // The close goes through the negotiation, so unsaved changes are still
+  // confirmed with the user.
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       e.preventDefault();
       void uToolsApi.closeDetail();
     }
+  });
+  // Host asks whether this page may be closed (beforeClose negotiation).
+  ipcRenderer.on(Ipc.EvtDetailBeforeClose, async (_e, reqId: number) => {
+    const allow = await askBeforeClose();
+    ipcRenderer.send(Ipc.DetailCloseResult, reqId, allow);
   });
   contextBridge.exposeInMainWorld("uTools", uToolsApi);
 } else if (isTopFrame) {
