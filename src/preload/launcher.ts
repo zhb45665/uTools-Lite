@@ -559,22 +559,21 @@ function toastLocal(msg: string): void {
   }
 }
 
+/* Latched by the EvtNoteWindowIdentity event (see wiring below). false until
+ * the main process confirms this frame is the standalone note window. */
+let noteWindowStandalone = false;
+
 /**
  * True when this plugin: frame is the TOP-LEVEL frame of the standalone
  * note window, as opposed to a sub-frame inside the main launcher's
  * inline iframe. The note window loads plugin://notes/detail.html directly
- * as its main page (isMainFrame === true); the launcher embeds it in an
- * <iframe> (isMainFrame === false). This is the reliable discriminator
- * because the URL and pluginId are identical in both cases.
+ * as its main page; the launcher embeds it in an <iframe>. Identity is
+ * pushed by the main process via EvtNoteWindowIdentity after did-finish-load
+ * (reliable — no URL query or process.isMainFrame dependency).
  */
 function isStandaloneNoteWindow(): boolean {
   if (pluginIdFromFrame !== "notes") return false;
-  // Reliable discriminator: the standalone note window loads
-  // plugin://notes/detail.html?standalone=1, while the main launcher's inline
-  // iframe loads the same path WITHOUT the query. process.isMainFrame is NOT
-  // used here — process is not always available in the isolated preload
-  // world, which made the old check unreliable and broke the close button.
-  return location.search.includes("standalone=1");
+  return noteWindowStandalone;
 }
 
 export type UToolsApi = typeof uToolsApi;
@@ -589,6 +588,13 @@ const isTopFrame =
   (process as { isMainFrame?: boolean }).isMainFrame !== false;
 
 if (location.protocol === "plugin:") {
+  // Latch the standalone-window identity flag. The main process sends this
+  // one-shot event to the standalone note window's webContents after
+  // did-finish-load; the main launcher's inline iframe never receives it,
+  // so noteWindowStandalone stays false there.
+  ipcRenderer.on(Ipc.EvtNoteWindowIdentity, (_e, isStandalone: boolean) => {
+    noteWindowStandalone = Boolean(isStandalone);
+  });
   // Esc inside the detail frame closes the view (acceptance: Esc -> 搜索态).
   // The close goes through the negotiation, so unsaved changes are still
   // confirmed with the user.

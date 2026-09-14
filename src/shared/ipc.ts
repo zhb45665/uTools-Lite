@@ -89,7 +89,17 @@ export const Ipc = {
 
  // --- standalone note window state ---
  /** main -> note window: 最大化/还原状态变更（标题栏按钮 glyph 切换）。 */
- EvtNoteWindowState: "note-window:evt-state",
+  EvtNoteWindowState: "note-window:evt-state",
+  /**
+   * One-shot identity push: sent to the note window's webContents right after
+   * did-finish-load, carrying true to confirm this frame is the standalone
+   * note window. The main launcher's inline iframe never receives this event,
+   * so its absence (or false) means inline mode. Reliable because it's
+   * pushed by the main process that actually created the window — no
+   * dependency on URL query (breaks plugin: protocol) or process.isMainFrame
+   * (unreliable in isolated preload world).
+   */
+  EvtNoteWindowIdentity: "note-window:evt-identity",
 } as const;
 
 export type IpcChannel = (typeof Ipc)[keyof typeof Ipc];

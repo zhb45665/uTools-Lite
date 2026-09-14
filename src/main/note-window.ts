@@ -84,14 +84,24 @@ export function openNoteWindow(ctx: {
     },
   });
 
-  // Load the notes detail page via the plugin: scheme. The ?standalone=1
-  // query flag is the RELIABLE discriminator between the standalone note
-  // window and the main launcher's inline iframe: both load the same
-  // plugin://notes/detail.html path, but only the standalone window carries
-  // this query. (process.isMainFrame in the preload is unreliable — process
-  // is not always available in the isolated preload world, which caused the
-  // close button to route to the wrong IPC channel.)
-  noteWin.loadURL("plugin://notes/detail.html?standalone=1");
+  // Load the notes detail page via the plugin: scheme. The standalone flag
+  // is pushed to the page via a one-shot IPC event AFTER load (see the
+  // did-finish-load handler below), because a ?query string on the plugin:
+  // scheme breaks Electron's custom-protocol request handling (caused a
+  // white-screen "load failed" error). process.isMainFrame in preload is
+  // also unreliable (process not available in isolated world).
+  noteWin.loadURL("plugin://notes/detail.html");
+
+  // Push the standalone identity flag to the page as early as possible.
+  // Use dom-ready (DOM parsed, fires around DOMContentLoaded) rather than
+  // did-finish-load (fires after all sub-resources load) so the flag is
+  // latched in the preload BEFORE the page's DOMContentLoaded handler reads
+  // uTools.isStandalone to decide whether to show the title bar. The main
+  // launcher's inline iframe never receives this event.
+  noteWin.webContents.on("dom-ready", () => {
+    noteWin?.webContents.send(Ipc.EvtNoteWindowIdentity, true);
+    emitWindowState();
+  });
 
   noteWin.on("close", (e) => {
     // While we are the ones calling destroy() (after a successful
