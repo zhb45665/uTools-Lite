@@ -1,0 +1,11 @@
+{
+  "id": "timestamp",
+  "name": "时间戳转换",
+  "description": "Unix 时间戳与日期时间互相转换：粘贴即转 · 毫秒/秒自动识别 · 多时区",
+  "version": "1.0.0",
+  "main": "main.js",
+  "detail": "detail.html",
+  "keywords": ["时间戳", "时间", "timestamp", "ts", "date"],
+  "icon": "⏱️",
+  "permissions": ["clipboard"]
+}

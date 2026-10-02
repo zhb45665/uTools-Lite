@@ -28,6 +28,7 @@ import {
   registerPluginProtocol,
 } from "./plugins/protocol";
 import { initLogger, log } from "./logger";
+import { initDatabase } from "./database";
 
 // plugin:// must be declared privileged before the app is ready.
 registerPluginScheme();
@@ -45,7 +46,10 @@ if (app.requestSingleInstanceLock()) {
     try {
       initLogger();
       log("INFO", "app", "application ready", `version=${app.getVersion()}`);
-      doStartup();
+      void doStartup().catch((error) => {
+        console.error("[init] startup failed", error);
+        log("ERROR", "app", "startup failed", error);
+      });
     } catch (e) {
       // A throw in this chain used to kill the packaged app silently
       // (unhandled rejection, no console for GUI apps). Log to userData so
@@ -65,7 +69,12 @@ if (app.requestSingleInstanceLock()) {
     }
   });
 
-  function doStartup() {
+  async function doStartup() {
+    // 移除 Electron 默认的原生菜单栏（File/Edit/View/Window/Help），
+    // 窗口已使用 frame:false 无边框模式，菜单栏多余且风格不统一。
+    Menu.setApplicationMenu(null);
+
+    await initDatabase();
     store = new SettingsStore();
     createLauncherWindow(store);
 

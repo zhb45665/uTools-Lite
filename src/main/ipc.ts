@@ -28,6 +28,7 @@ import {
 } from "./launcher-window";
 import { isNoteWindowOpen, getNoteWindow } from "./note-window";
 import { runSearch } from "./search";
+import { recordSearchSelection } from "./search-usage";
 import {
   detectEverything,
   openLocalEverything,
@@ -69,6 +70,13 @@ export function registerIpc(
   ipcMain.handle(Ipc.SearchQuery, async (_e, query: string) => {
     return runSearch(query ?? "");
   });
+  ipcMain.handle(
+    Ipc.SearchRecordSelection,
+    (_e, query: string, item: SearchItem) => {
+      recordSearchSelection(typeof query === "string" ? query : "", item);
+      return { ok: true };
+    },
+  );
 
   ipcMain.handle(
     Ipc.Launch,
@@ -416,10 +424,16 @@ export function registerIpc(
     return pm.handleSelect(item ?? ({} as SearchItem));
   });
 
-  ipcMain.handle(Ipc.PluginDetailReady, () => {
-    // The launcher top frame reports iframe onLoad; it is not the recipient.
-    // detailSend records the actual plugin frame when it sends its first request.
-    pm.markDetailReady();
+  ipcMain.handle(Ipc.PluginDetailReady, (e) => {
+    // The launcher top frame reports iframe onLoad; it is NOT the recipient
+    // of host->detail events. Record the ACTUAL plugin-iframe routing id
+    // (or clear the stale one) here, because detailSend-based recording can
+    // be racy: the iframe's first request may arrive before onLoad, and a
+    // stale routing id from a previous mount makes sendToFrame silently
+    // drop events (one root cause of "detail view cannot be closed").
+    const fid = frameIdOf(e);
+    pm.markDetailFrame(fid);
+    pm.markDetailReady(fid);
     return { ok: true };
   });
 
@@ -443,8 +457,8 @@ export function registerIpc(
     console.log("[ipc] NoteWindowClose received");
     const { closeNoteWindow, isNoteWindowOpen } = await import("./note-window");
     console.log(`[ipc] NoteWindowClose isNoteWindowOpen=${isNoteWindowOpen()}`);
-    await closeNoteWindow(false);
-    return { ok: true };
+    const closed = await closeNoteWindow(false);
+    return { ok: true, closed };
   });
 
   // Standalone note window: custom title-bar buttons (minimize / maximize).
@@ -483,7 +497,12 @@ export function registerIpc(
     // (bypasses activeDetail, which is bound to the main launcher iframe).
     const fromNoteWin =
       isNoteWindowOpen() && e.sender === getNoteWindow()?.webContents;
-    pm.detailSend(data, frameIdOf(e), fromNoteWin ? getNoteWindow() : null);
+    const fid = frameIdOf(e);
+    // Remember the actual plugin-iframe routing id (a stale one would make
+    // host->frame sends silently drop). The launcher top frame itself never
+    // sends on this channel, so a non-null fid is always the plugin frame.
+    if (!fromNoteWin) pm.markDetailFrame(fid);
+    pm.detailSend(data, fromNoteWin ? null : fid, fromNoteWin ? getNoteWindow() : null);
     return { ok: true };
   });
 

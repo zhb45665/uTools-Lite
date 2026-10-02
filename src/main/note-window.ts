@@ -1,4 +1,4 @@
-import { BrowserWindow, screen } from "electron";
+import { BrowserWindow, ipcMain, screen } from "electron";
 import path from "node:path";
 import { Ipc } from "../shared/ipc";
 import { hideLauncher } from "./launcher-window";
@@ -6,6 +6,9 @@ import { getPluginManager } from "./plugins/manager";
 
 let noteWin: BrowserWindow | null = null;
 let noteContext: {
+  pluginId: string;
+  pluginName: string;
+  detail: string;
   keyword: string;
   value: string;
   item: unknown;
@@ -14,6 +17,7 @@ let noteContext: {
 // "close" event, which would otherwise preventDefault() + re-negotiate
 // forever (the window could never actually close).
 let noteWinDestroying = false;
+let noteClosePromise: Promise<boolean> | null = null;
 
 /**
  * Open (or focus) a standalone, resizable note window.
@@ -33,7 +37,30 @@ export function openNoteWindow(ctx: {
   value: string;
   item: unknown;
 }): void {
+  openStandalonePluginWindow({
+    pluginId: "notes",
+    pluginName: "随手笔记",
+    detail: "detail.html",
+    ...ctx,
+  });
+}
+
+/** Open a long-form plugin in a dedicated resizable window. */
+export function openStandalonePluginWindow(ctx: {
+  pluginId: string;
+  pluginName: string;
+  detail: string;
+  keyword: string;
+  value: string;
+  item: unknown;
+}): void {
   if (noteWin && !noteWin.isDestroyed()) {
+    if (noteContext?.pluginId !== ctx.pluginId) {
+      void closeWithNegotiation(false).then((closed) => {
+        if (closed) openStandalonePluginWindow(ctx);
+      });
+      return;
+    }
     // Already open: update the context payload and re-focus.
     noteContext = ctx;
     if (noteWin.isMinimized()) noteWin.restore();
@@ -47,8 +74,17 @@ export function openNoteWindow(ctx: {
   // Size: start at a comfortable default; the user can drag the edges.
   const display = screen.getPrimaryDisplay();
   const { width: dw, height: dh } = display.workAreaSize;
-  const w = Math.min(1000, dw - 80);
-  const h = Math.min(700, dh - 120);
+  const preferredSize: Record<string, { width: number; height: number }> = {
+    password: { width: 1120, height: 760 },
+    notes: { width: 1000, height: 700 },
+    "calc-paper": { width: 900, height: 640 },
+    amount: { width: 820, height: 560 },
+    timestamp: { width: 900, height: 640 },
+    ocr: { width: 1040, height: 720 },
+  };
+  const preferred = preferredSize[ctx.pluginId] ?? { width: 920, height: 660 };
+  const w = Math.min(preferred.width, dw - 80);
+  const h = Math.min(preferred.height, dh - 100);
   const x = Math.round(display.workArea.x + (dw - w) / 2);
   const y = Math.round(display.workArea.y + (dh - h) / 2);
 
@@ -61,9 +97,11 @@ export function openNoteWindow(ctx: {
     // Frameless: no native blue title bar. The page draws its own minimal
     // title bar (drag region + minimize/maximize/close buttons). Windows
     // edge-resize works via thickFrame (native frame metrics, transparent).
-    frame: false,
+    // Notes/password/amount 等插件均使用无边框，保持整体 UI 风格统一。
+    // 如需新插件也去掉蓝色标题栏，只需将 pluginId 加入下方列表。
+    frame: !["notes", "password", "amount", "calc-paper", "timestamp", "ocr"].includes(ctx.pluginId),
     thickFrame: true,
-    title: "随手笔记",
+    title: ctx.pluginName,
     resizable: true,
     minimizable: true,
     maximizable: true,
@@ -71,8 +109,8 @@ export function openNoteWindow(ctx: {
     skipTaskbar: false,
     alwaysOnTop: false,
     hasShadow: true,
-    // Match the notes page background so the frameless edge is seamless.
-    backgroundColor: "#f7f7f9",
+    // 匹配各插件页面背景色，frameless 边缘无白边。
+    backgroundColor: ctx.pluginId === "password" ? "#f2f5fa" : "#f7f7f9",
     webPreferences: {
       preload: path.join(__dirname, "../preload/launcher.js"),
       contextIsolation: true,
@@ -90,7 +128,7 @@ export function openNoteWindow(ctx: {
   // scheme breaks Electron's custom-protocol request handling (caused a
   // white-screen "load failed" error). process.isMainFrame in preload is
   // also unreliable (process not available in isolated world).
-  noteWin.loadURL("plugin://notes/detail.html");
+  noteWin.loadURL(`plugin://${ctx.pluginId}/${ctx.detail}`);
 
   // Push the standalone identity flag to the page as early as possible.
   // Use dom-ready (DOM parsed, fires around DOMContentLoaded) rather than
@@ -117,6 +155,7 @@ export function openNoteWindow(ctx: {
   });
 
   noteWin.on("closed", () => {
+    noteClosePromise = null;
     noteWin = null;
     noteContext = null;
   });
@@ -142,24 +181,37 @@ export function openNoteWindow(ctx: {
  *
  * @param force true to skip negotiation (app quit path).
  */
-export async function closeNoteWindow(force = false): Promise<void> {
+export async function closeNoteWindow(force = false): Promise<boolean> {
   if (noteWin && !noteWin.isDestroyed()) {
-    await closeWithNegotiation(force);
+    return closeWithNegotiation(force);
+  }
+  return true;
+}
+
+async function closeWithNegotiation(force: boolean): Promise<boolean> {
+  if (!noteWin || noteWin.isDestroyed()) return true;
+  if (noteClosePromise) return noteClosePromise;
+  noteClosePromise = closeWithNegotiationOnce(force);
+  try {
+    return await noteClosePromise;
+  } finally {
+    noteClosePromise = null;
   }
 }
 
-async function closeWithNegotiation(force: boolean): Promise<void> {
-  if (!noteWin || noteWin.isDestroyed()) return;
+async function closeWithNegotiationOnce(force: boolean): Promise<boolean> {
+  const win = noteWin;
+  if (!win || win.isDestroyed()) return true;
   console.log(
-    `[note-window] closeWithNegotiation force=${force} win=${noteWin.id}`,
+    `[note-window] closeWithNegotiation force=${force} win=${win.id}`,
   );
 
   if (!force) {
     // Ask the page: may we close?
     console.log("[note-window] negotiating beforeClose...");
-    const allow = await negotiateBeforeClose(noteWin);
+    const allow = await negotiateBeforeClose(win);
     console.log(`[note-window] negotiation result allow=${allow}`);
-    if (!allow) return; // page said no — stay open
+    if (!allow) return false; // page said no — stay open
   }
 
   // Tell the plugin sandbox we're exiting (fires onExit in main.js).
@@ -184,66 +236,71 @@ async function closeWithNegotiation(force: boolean): Promise<void> {
 
   // Mark as destroying BEFORE destroy() so the re-fired "close" event is
   // not intercepted into another negotiation loop.
+  if (win.isDestroyed()) return true;
   noteWinDestroying = true;
   try {
     console.log("[note-window] calling destroy()");
-    noteWin.destroy();
+    win.destroy();
   } catch (e) {
     console.error("[note-window] destroy() threw", e);
   } finally {
     noteWinDestroying = false;
   }
-  noteWin = null;
-  noteContext = null;
+  if (noteWin === win) {
+    noteWin = null;
+    noteContext = null;
+  }
   console.log("[note-window] closeWithNegotiation done");
+  return true;
 }
 
 /**
  * Ask the note page whether it allows closing. Sends EvtDetailBeforeClose
- * and waits for DetailCloseResult, with a 10-second timeout (safe policy:
- * an unanswered page is closed anyway).
+ * and waits for DetailCloseResult. An unanswered or destroyed page is kept
+ * open/treated as denied so an uncertain save can never silently lose data.
  */
 function negotiateBeforeClose(win: BrowserWindow): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     let settled = false;
     const reqId = Date.now() + Math.floor(Math.random() * 1000);
 
-    const onResult = (_e: unknown, id: number, allow: boolean) => {
-      if (id === reqId) {
+    const senderId = win.webContents.id;
+    let timer: NodeJS.Timeout | null = null;
+    const onResult = (event: Electron.IpcMainEvent, id: number, allow: boolean) => {
+      if (event.sender.id === senderId && id === reqId) {
         console.log(`[note-window] DetailCloseResult received allow=${allow}`);
         settle(Boolean(allow));
       }
     };
-    // SAFETY: Electron's d.ts only types a subset of WebContents events;
-    // the cast silences the incomplete event-name union. The listener
-    // receives (event, reqId, allow) at runtime.
-    const onResultAny = onResult as unknown as (event: unknown) => void;
-
     const settle = (allow: boolean) => {
       if (settled) return;
       settled = true;
-      // SAFETY: same event-name union cast as the .on() call above; the
-      // channel name is a valid runtime event, the d.ts union is incomplete.
-      win.webContents.removeListener(
-        Ipc.DetailCloseResult as unknown as "zoom-changed",
-        onResultAny,
-      );
+      if (timer) clearTimeout(timer);
+      ipcMain.removeListener(Ipc.DetailCloseResult, onResult);
+      win.removeListener("closed", onWindowGone);
       resolve(allow);
     };
 
-    const timer = setTimeout(() => {
-      console.log("[note-window] negotiation TIMEOUT -> allow close");
-      settle(true);
+    const onWindowGone = () => settle(false);
+
+    timer = setTimeout(() => {
+      console.log("[note-window] negotiation TIMEOUT -> keep open");
+      settle(false);
     }, 10_000);
     timer.unref?.();
 
-    // SAFETY: same event-name union cast; see comment on onResultAny.
-    win.webContents.on(
-      Ipc.DetailCloseResult as unknown as "zoom-changed",
-      onResultAny,
-    );
+    ipcMain.on(Ipc.DetailCloseResult, onResult);
+    win.once("closed", onWindowGone);
     console.log("[note-window] sending EvtDetailBeforeClose to page");
-    win.webContents.send(Ipc.EvtDetailBeforeClose, reqId);
+    if (win.isDestroyed() || win.webContents.isDestroyed()) {
+      settle(false);
+      return;
+    }
+    try {
+      win.webContents.send(Ipc.EvtDetailBeforeClose, reqId);
+    } catch {
+      settle(false);
+    }
   });
 }
 
@@ -261,12 +318,17 @@ export function noteWindowContext(): {
 } | null {
   if (!noteContext) return null;
   return {
-    pluginId: "notes",
-    pluginName: "随手笔记",
+    pluginId: noteContext.pluginId,
+    pluginName: noteContext.pluginName,
     keyword: noteContext.keyword,
     value: noteContext.value,
     item: noteContext.item,
   };
+}
+
+/** Plugin currently hosted by the standalone window. */
+export function standaloneWindowPluginId(): string | null {
+  return isNoteWindowOpen() ? noteContext?.pluginId ?? null : null;
 }
 
 /** True when the note window is currently open. */

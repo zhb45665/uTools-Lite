@@ -49,10 +49,14 @@ export function createLauncherWindow(settings: SettingsStore): void {
   store = settings;
   if (win) return;
 
-  const { width, height } = store.get("rememberSize") ?? {
-    width: 720,
-    height: 460,
+  const remembered = store.get("rememberSize") ?? {
+    width: 760,
+    height: 540,
   };
+  // Earlier builds persisted a 720x460 launcher which forced the home tool
+  // shelf to scroll. Keep the compact shape while guaranteeing enough room.
+  const width = Math.max(760, remembered.width);
+  const height = Math.max(540, remembered.height);
 
   win = new BrowserWindow({
     width,

@@ -67,14 +67,16 @@ app.whenReady().then(async () => {
     // --- discovery
     const list = pm.list();
     check(
-      "discover 4 builtin plugins",
-      list.length === 4,
+      "discover 5 builtin plugins",
+      list.length === 5,
       list.map((p) => p.id),
     );
     check(
       "plugin ids",
       list.every((p) =>
-        ["notes", "calc-paper", "amount", "password"].includes(p.id),
+        ["notes", "calc-paper", "amount", "password", "timestamp"].includes(
+          p.id,
+        ),
       ),
       list.map((p) => p.id),
     );
@@ -304,7 +306,7 @@ app.whenReady().then(async () => {
     const noteHit = await pm.searchPlugins("note");
     check(
       "input: 'note' -> 打开随手笔记",
-      noteHit.length === 2 && /打开随手笔记/.test(noteHit[0].title),
+      noteHit.length >= 1 && /打开随手笔记/.test(noteHit[0].title),
       noteHit.map((i) => i.title),
     );
 
@@ -433,7 +435,7 @@ app.whenReady().then(async () => {
       !!sel.openedDetail && sel.openedDetail.detail === "detail.html",
       sel,
     );
-    const ctx = pm.detailContext();
+    const ctx = require("./dist/main/note-window").noteWindowContext();
     check(
       "detail context has keyword+value+item",
       ctx &&

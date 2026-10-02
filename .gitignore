@@ -33,6 +33,7 @@ release/*
 build/*.png
 !build/icon.png
 !build/tray-icon.png
+!build/icon-source.png
 
 # logs & OS noise
 *.log

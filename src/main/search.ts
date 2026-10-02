@@ -1,13 +1,11 @@
 import { filter } from "fuzzaldrin-plus";
 import type { AppEntry } from "./file-index/app-index";
 import { SearchItem, SearchResponse } from "../shared/ipc";
-import {
-  searchEverything,
-  findEverythingExe,
-} from "./file-index/everything-cli";
+import { searchEverything } from "./file-index/everything-cli";
 import { appPinyinKeys } from "./file-index/app-index";
 import { scanApps } from "./file-index/app-index";
 import { searchLocalIndex, getIndexStatus } from "./file-index/local-index";
+import { applyUsageRanking } from "./search-usage";
 import { getIconUrl } from "./file-index/icon-service";
 import { getPluginManager } from "./plugins/manager";
 
@@ -214,20 +212,6 @@ export async function runSearch(query: string): Promise<SearchResponse> {
     }
   }
 
-  // Everything 联动：本地安装了 Everything 时，提供回车直达全盘检索入口。
-  // 注意：应用命中后（appsFirst=true）这个入口会排到应用/文件之后，
-  // 因为用户意图是启动应用而非全盘文件搜索。
-  if (findEverythingExe()) {
-    response.commands.push({
-      id: `cmd:everything:${q}`,
-      type: "command" as const,
-      title: `在 Everything 中搜索「${q}」`,
-      subtitle: "回车调起本地 Everything 极速呈现全盘结果",
-      icon: "🔍",
-      payload: `everything:${q}`,
-    });
-  }
-
   // File search via Everything (instant when available), plugin keyword
   // match, and app fuzzy match all run in parallel; the UI fills as they land.
   const [fileRes, pluginItems, apps] = await Promise.all([
@@ -292,5 +276,5 @@ export async function runSearch(query: string): Promise<SearchResponse> {
     });
   }
 
-  return response;
+  return applyUsageRanking(response, q);
 }

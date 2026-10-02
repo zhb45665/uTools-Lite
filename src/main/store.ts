@@ -1,6 +1,7 @@
 import { app } from "electron";
 import fs from "node:fs";
 import path from "node:path";
+import { readState, writeState } from "./database";
 
 export interface AppSettings {
   schemaVersion: number;
@@ -37,28 +38,41 @@ export class SettingsStore {
 
   private load(): AppSettings {
     try {
-      const raw = fs.readFileSync(this.file, "utf8");
-      const parsed = JSON.parse(raw) as Partial<AppSettings>;
+      let parsed = readState<Partial<AppSettings>>("app", "settings");
+      if (!parsed) {
+        parsed = JSON.parse(fs.readFileSync(this.file, "utf8")) as Partial<AppSettings>;
+        writeState("app", "settings", parsed);
+      }
       const size = parsed.rememberSize;
       return {
         ...DEFAULTS,
-        hotkey: typeof parsed.hotkey === "string" ? parsed.hotkey : DEFAULTS.hotkey,
-        rememberSize: size && Number.isFinite(size.width) && Number.isFinite(size.height)
-          // Cap at a size comfortably below any work area: the launcher is a
-          // compact floating card, and the credential workspace expands via
-          // setCredentialWindow (not via rememberSize). A persisted
-          // full-screen size (e.g. from a pre-guard maximize bug) must not
-          // survive a restart — clamp it back to the compact range.
-          ? { width: Math.max(520, Math.min(1200, size.width!)), height: Math.max(360, Math.min(800, size.height!)) }
-          : DEFAULTS.rememberSize,
+        hotkey:
+          typeof parsed.hotkey === "string" ? parsed.hotkey : DEFAULTS.hotkey,
+        rememberSize:
+          size && Number.isFinite(size.width) && Number.isFinite(size.height)
+            ? // Cap at a size comfortably below any work area: the launcher is a
+              // compact floating card, and the credential workspace expands via
+              // setCredentialWindow (not via rememberSize). A persisted
+              // full-screen size (e.g. from a pre-guard maximize bug) must not
+              // survive a restart — clamp it back to the compact range.
+              {
+                width: Math.max(520, Math.min(1200, size.width!)),
+                height: Math.max(360, Math.min(800, size.height!)),
+              }
+            : DEFAULTS.rememberSize,
         hasLaunchedBefore: parsed.hasLaunchedBefore === true,
         launchAtLogin: parsed.launchAtLogin === true,
         theme: ["system", "light", "dark"].includes(String(parsed.theme))
-          ? parsed.theme as AppSettings["theme"] : DEFAULTS.theme,
+          ? (parsed.theme as AppSettings["theme"])
+          : DEFAULTS.theme,
       };
     } catch (e) {
       if (fs.existsSync(this.file)) {
-        try { fs.copyFileSync(this.file, `${this.file}.corrupt-${Date.now()}`); } catch { /* best effort */ }
+        try {
+          fs.copyFileSync(this.file, `${this.file}.corrupt-${Date.now()}`);
+        } catch {
+          /* best effort */
+        }
         console.error("[store] invalid settings; defaults restored", e);
       }
       return { ...DEFAULTS };
@@ -66,14 +80,9 @@ export class SettingsStore {
   }
 
   private persist(): void {
-    const temp = `${this.file}.${process.pid}.tmp`;
-    const backup = `${this.file}.previous`;
     try {
-      fs.writeFileSync(temp, JSON.stringify(this.cache, null, 2), { encoding: "utf8", mode: 0o600 });
-      if (fs.existsSync(this.file)) fs.copyFileSync(this.file, backup);
-      fs.renameSync(temp, this.file);
+      writeState("app", "settings", this.cache);
     } catch (e) {
-      try { fs.unlinkSync(temp); } catch { /* ignore */ }
       console.error("[store] failed to persist settings", e);
     }
   }

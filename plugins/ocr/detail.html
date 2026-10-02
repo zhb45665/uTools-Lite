@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>OCR 文字识别</title>
+  <style>
+    :root { --bg:#f1f4f8; --panel:#fff; --text:#182333; --dim:#69778a; --faint:#8b97a7; --line:#dce3ec; --soft:#f4f7fb; --accent:#2864c7; --accent-soft:#edf3ff; --danger:#c7434d; --ok:#1a7f37; }
+    @media(prefers-color-scheme:dark){:root{--bg:#1a1a1e;--panel:#202834;--text:#e8e8ea;--dim:#a2adbc;--faint:#7f8b9d;--line:#354152;--soft:#2b3543;--accent:#7fa5f5;--accent-soft:#293a59;--danger:#e2726a;--ok:#6cc187}}
+    *{box-sizing:border-box;margin:0;padding:0} html,body{height:100%} body{display:flex;flex-direction:column;background:radial-gradient(circle at 50% -20%,var(--accent-soft),transparent 48%),var(--bg);color:var(--text);font:14px "Segoe UI Variable","Microsoft YaHei UI",sans-serif}
+    .bar{height:60px;display:flex;align-items:center;gap:10px;padding:9px 7px 9px 18px;background:var(--panel);border-bottom:1px solid var(--line);-webkit-app-region:drag;user-select:none;flex:none}.brand{display:flex;align-items:center;gap:10px}.mark{width:38px;height:38px;display:grid;place-items:center;border-radius:11px;background:var(--accent);color:#fff;font-size:20px;box-shadow:0 7px 18px #2864c733}.copy{display:flex;flex-direction:column}.copy strong{font-size:16px}.copy small,.status{font-size:11px;color:var(--dim)}.status{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    button{border:0;border-radius:8px;background:var(--soft);color:var(--text);padding:8px 13px;font-size:13px;cursor:pointer;-webkit-app-region:no-drag}button:hover{filter:brightness(.97)}button.primary{background:var(--accent);color:#fff}button:disabled{opacity:.5;cursor:not-allowed}.controls{align-self:stretch;display:flex;align-items:center;border-left:1px solid var(--line);padding-left:6px;-webkit-app-region:no-drag}.controls button{width:38px;height:32px;padding:0;background:transparent}.controls .close:hover{background:#c7434d;color:#fff}
+    main{min-height:0;flex:1;display:grid;grid-template-columns:minmax(300px,.9fr) minmax(380px,1.1fr);gap:14px;padding:14px}.card{min-height:0;background:var(--panel);border:1px solid var(--line);border-radius:15px;box-shadow:0 12px 34px #20324a0d;overflow:hidden}.preview-card{display:flex;flex-direction:column}.card-head{height:46px;display:flex;align-items:center;gap:8px;padding:0 15px;border-bottom:1px solid var(--line)}.card-head strong{font-size:13px}.meta{margin-left:auto;color:var(--faint);font-size:11px}.preview{min-height:0;flex:1;display:grid;place-items:center;padding:18px;background-image:linear-gradient(45deg,var(--soft) 25%,transparent 25%),linear-gradient(-45deg,var(--soft) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--soft) 75%),linear-gradient(-45deg,transparent 75%,var(--soft) 75%);background-size:18px 18px;background-position:0 0,0 9px,9px -9px,-9px 0}.preview img{display:none;max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 8px 30px #15243a26}.empty{text-align:center;color:var(--dim)}.empty .empty-icon{width:54px;height:54px;margin:0 auto 12px;display:grid;place-items:center;border-radius:16px;background:var(--accent-soft);color:var(--accent);font-size:25px}.empty small{display:block;margin-top:6px;color:var(--faint)}
+    .result-card{display:flex;flex-direction:column}.result-wrap{min-height:0;flex:1;position:relative}textarea{width:100%;height:100%;resize:none;border:0;outline:0;background:transparent;color:var(--text);padding:18px;font:15px/1.75 "Segoe UI Variable","Microsoft YaHei UI",sans-serif}.result-empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:var(--faint);pointer-events:none}.result-empty span{max-width:260px;line-height:1.7}.result-foot{height:38px;display:flex;align-items:center;padding:0 14px;border-top:1px solid var(--line);color:var(--faint);font-size:11px}.result-foot .sp{flex:1}.confidence.good{color:var(--ok)}
+    .busy{position:absolute;inset:0;display:none;place-items:center;background:color-mix(in srgb,var(--panel) 86%,transparent);z-index:2}.busy.show{display:grid}.spinner{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}.busy p{margin-top:12px;color:var(--dim)}@keyframes spin{to{transform:rotate(360deg)}}
+    @media(max-width:760px){main{grid-template-columns:1fr;overflow:auto}.card{min-height:320px}}@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+  </style>
+</head>
+<body>
+  <header class="bar">
+    <div class="brand"><span class="mark">◫</span><div class="copy"><strong>OCR 文字识别</strong><small>中文、英文与数字离线识别</small></div></div>
+    <span class="status" id="status">请选择图片</span>
+    <button id="capture" title="像微信截图一样自由框选屏幕区域">选择截图</button><button id="paste">粘贴截图</button><button id="pick">选择图片</button><button class="primary" id="recognize" disabled>开始识别</button>
+    <div class="controls"><button id="window-min" title="最小化">─</button><button id="window-max" title="最大化">□</button><button class="close" id="window-close" title="关闭">✕</button></div>
+  </header>
+  <main>
+    <section class="card preview-card"><div class="card-head"><strong>图片预览</strong><span class="meta" id="image-meta"></span></div><div class="preview"><div class="empty" id="preview-empty"><div class="empty-icon">▧</div><div>选择截图、粘贴截图或选择本地图片</div><small>截图后可自由调整选区大小</small></div><img id="preview-image" alt="待识别图片" /></div></section>
+    <section class="card result-card"><div class="card-head"><strong>识别结果</strong><span class="meta" id="char-count">0 字</span><button id="copy" disabled>复制文字</button><button id="clear">清空</button></div><div class="result-wrap"><textarea id="result" spellcheck="false" placeholder=""></textarea><div class="result-empty" id="result-empty"><span>识别出的文字会显示在这里，并且可以继续编辑</span></div><div class="busy" id="busy"><div><div class="spinner"></div><p>正在本机识别…</p></div></div></div><div class="result-foot"><span>图片仅在本机处理，不会上传</span><span class="sp"></span><span class="confidence" id="confidence"></span></div></section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const preview = $("preview-image"), previewEmpty = $("preview-empty"), result = $("result"), resultEmpty = $("result-empty");
+    const recognizeBtn = $("recognize"), copyBtn = $("copy"), busy = $("busy"), status = $("status");
+    let currentImage = "";
+    $("window-min").onclick = () => void uTools.noteWindowMinimize();
+    $("window-max").onclick = () => void uTools.noteWindowToggleMaximize();
+    $("window-close").onclick = () => void uTools.closeDetail();
+    uTools.onNoteWindowState((maximized) => { $("window-max").textContent = maximized ? "❐" : "□"; $("window-max").title = maximized ? "还原" : "最大化"; });
+    function setImage(data) { currentImage = data.dataUrl || ""; preview.src = currentImage; preview.style.display = currentImage ? "block" : "none"; previewEmpty.style.display = currentImage ? "none" : "block"; $("image-meta").textContent = currentImage ? `${data.name || "图片"} · ${data.width} × ${data.height}` : ""; recognizeBtn.disabled = !currentImage; status.textContent = currentImage ? "图片已就绪" : "请选择图片"; }
+    function updateResult() { const text = result.value; resultEmpty.style.display = text ? "none" : "grid"; $("char-count").textContent = `${text.length} 字`; copyBtn.disabled = !text; }
+    async function loadImage(loader) { try { setImage(await loader()); result.value = ""; $("confidence").textContent = ""; updateResult(); } catch (e) { status.textContent = String(e.message || e).replace(/^Error:\s*/, ""); } }
+    $("paste").onclick = () => loadImage(() => uTools.getClipboardImage());
+    $("capture").onclick = async () => { try { status.textContent = "请选择屏幕区域"; const data = await uTools.captureOcrScreen(); if (!data.canceled) { setImage(data); recognizeBtn.click(); } else status.textContent = currentImage ? "已取消截图" : "请选择图片"; } catch(e) { status.textContent = `截图失败：${String(e.message || e).replace(/^Error:\s*/, "")}`; } };
+    $("pick").onclick = async () => { try { const data = await uTools.pickOcrImage(); if (!data.canceled) setImage(data); } catch(e) { status.textContent = String(e.message || e).replace(/^Error:\s*/, ""); } };
+    recognizeBtn.onclick = async () => { if (!currentImage) return; busy.classList.add("show"); recognizeBtn.disabled = true; status.textContent = "正在加载离线识别引擎…"; try { const data = await uTools.recognizeOcrImage(currentImage); result.value = data.text || ""; const confidence = $("confidence"); confidence.textContent = data.text ? `识别可信度 ${data.confidence}%` : "未识别到文字"; confidence.className = data.confidence >= 70 ? "confidence good" : "confidence"; status.textContent = data.text ? "识别完成" : "未识别到文字"; updateResult(); } catch(e) { status.textContent = `识别失败：${String(e.message || e).replace(/^Error:\s*/, "")}`; } finally { busy.classList.remove("show"); recognizeBtn.disabled = !currentImage; } };
+    copyBtn.onclick = async () => { if (!result.value) return; await uTools.copyText(result.value); status.textContent = "文字已复制"; };
+    $("clear").onclick = () => { currentImage = ""; preview.removeAttribute("src"); preview.style.display = "none"; previewEmpty.style.display = "block"; result.value = ""; $("image-meta").textContent = ""; $("confidence").textContent = ""; recognizeBtn.disabled = true; status.textContent = "已清空"; updateResult(); };
+    result.addEventListener("input", updateResult);
+    window.addEventListener("paste", (e) => { const item = Array.from(e.clipboardData?.items || []).find((x) => x.type.startsWith("image/")); if (!item) return; const file = item.getAsFile(); if (!file) return; e.preventDefault(); const reader = new FileReader(); reader.onload = () => setImage({ dataUrl: reader.result, name: "粘贴的图片", width: "?", height: "?" }); reader.readAsDataURL(file); });
+    updateResult();
+  </script>
+</body>
+</html>

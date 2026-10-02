@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>时间戳转换</title>
+  <style>
+    /* Theme follows the OS (Electron themeSource=system). */
+    :root {
+      --bg:#f1f4f8; --panel:#fff; --text:#182333; --dim:#69778a;
+      --faint:#8b97a7; --divider:#dce3ec; --input-text:#182333;
+      --btn-soft:#f4f7fb; --accent:#2864c7;
+      --danger-text: #c03c32;
+      --row-hover: rgba(0, 0, 0, 0.045);
+      --ok: #1a7f37; --accent-soft:#edf3ff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1a1a1e;
+        --text: #e8e8ea;
+        --dim: rgba(255, 255, 255, 0.4);
+        --faint: rgba(255, 255, 255, 0.3);
+        --divider: rgba(255, 255, 255, 0.08);
+        --input-text: #f2f2f4;
+        --btn-soft: rgba(255, 255, 255, 0.1);
+        --accent: #6d93e8;
+        --danger-text: #e2726a;
+        --row-hover: rgba(255, 255, 255, 0.06);
+        --ok: #6cc187; --accent-soft:rgba(109,147,232,.13);
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      display: flex;
+      flex-direction: column;
+      background: radial-gradient(circle at 50% -20%, var(--accent-soft), transparent 48%), var(--bg);
+      color: var(--text);
+      font:14px "Segoe UI Variable","Microsoft YaHei UI",sans-serif;
+    }
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height:60px; padding:9px 7px 9px 18px;
+      border-bottom: 1px solid var(--divider);
+      flex-shrink: 0;
+      background:var(--panel); -webkit-app-region:drag; user-select:none;
+    }
+    .tool-brand { display:flex; align-items:center; gap:10px; }.brand-mark { width:38px; height:38px; display:grid; place-items:center; border-radius:11px; background:var(--accent); color:#fff; font-size:17px; box-shadow:0 7px 18px #2864c733; }.brand-copy { display:flex; flex-direction:column; }.brand-copy strong { font-size:16px; }.brand-copy small { color:var(--dim); font-size:11px; }
+    .bar .status { flex: 1; font-size: 11px; color: var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    button {
+      background: var(--btn-soft);
+      border: none;
+      color: var(--text);
+      border-radius: 7px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      -webkit-app-region:no-drag;
+    }
+    button:hover { filter: brightness(0.96); }
+
+    .inputrow {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin:14px 14px 8px; padding:15px 18px;
+      border-bottom: 1px solid var(--divider);
+      flex-shrink: 0;
+      background:var(--panel); border:1px solid var(--divider); border-radius:14px;
+      box-shadow:0 8px 24px #20324a09; transition:border-color .18s ease, box-shadow .18s ease;
+    }
+    .inputrow:focus-within { border-color:color-mix(in srgb, var(--accent) 48%, var(--divider)); box-shadow:0 10px 28px #2864c715; }
+    .inputrow .hint {
+      font-size: 12px;
+      color: var(--dim);
+      flex-shrink: 0;
+    }
+    .ts-input {
+      flex: 1;
+      border: none;
+      outline: none;
+      background: transparent;
+      color: var(--input-text);
+      font: 22px/1.3 Consolas, "Courier New", monospace;
+      letter-spacing: 0.5px;
+      padding: 0;
+    }
+    .ts-input::placeholder { color: var(--faint); font-size: 15px; letter-spacing: 0; }
+
+    .tzrow {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding:4px 18px 10px;
+      flex-shrink: 0;
+    }
+    .tzrow .tzlabel { font-size: 12px; color: var(--dim); }
+    .tzrow select {
+      background: var(--btn-soft);
+      border: none;
+      color: var(--text);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 12px;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .results { flex:1; overflow-y:auto; margin:0 14px 14px; padding:10px; background:var(--panel); border:1px solid var(--divider); border-radius:14px; box-shadow:0 12px 34px #20324a0d; }
+    .row {
+      padding: 9px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .row:hover { background: var(--row-hover); }
+    .row .label {
+      font-size: 12px;
+      color: var(--dim);
+      margin-bottom: 3px;
+    }
+    .row .value {
+      font: 19px/1.5 Consolas, "Courier New", monospace;
+      word-break: break-all;
+    }
+    .row.primary .value {
+      font-size: 25px;
+      color: var(--accent);
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+    .row.copied .value { color: var(--ok); }
+    .empty {
+      height:100%; min-height:180px; padding:26px 14px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px;
+      text-align: center;
+      color: var(--faint);
+      font-size: 13px;
+    }
+    .empty::before { content:"◷"; width:44px; height:44px; display:grid; place-items:center; border-radius:14px; background:var(--accent-soft); color:var(--accent); font-size:22px; }
+    .empty small { font-size:11px; color:var(--faint); }
+    .foot {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 6px 14px;
+      font-size: 11px;
+      color: var(--faint);
+      border-top: 1px solid var(--divider);
+      flex-shrink: 0;
+    }
+    .foot .sp { flex: 1; }
+    .window-controls { align-self:stretch; display:flex; align-items:center; margin-left:4px; padding-left:6px; border-left:1px solid var(--divider); -webkit-app-region:no-drag; }.window-controls .window-btn { width:38px; height:32px; padding:0; border:0; border-radius:7px; background:transparent; color:var(--dim); display:grid; place-items:center; font-size:13px; }.window-controls .window-btn:hover { background:var(--btn-soft); color:var(--text); }.window-controls .window-close:hover { background:#c7434d; color:#fff; }
+    @media(prefers-color-scheme:dark) { :root { --panel:#202834; }.brand-mark { color:#182333; box-shadow:none; } }
+    @media(prefers-reduced-motion:reduce) { * { transition:none!important; } }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <div class="tool-brand"><span class="brand-mark">◷</span><div class="brand-copy"><strong>时间戳转换</strong><small>时间、时区与 Unix 时间戳</small></div></div>
+    <span class="status" id="status">加载中…</span>
+    <button id="now">🕐 当前时间</button>
+    <button id="paste">📋 读剪贴板</button>
+    <button id="clear">清空</button>
+    <div class="window-controls" aria-label="窗口控制"><button class="window-btn" id="window-min" title="最小化">─</button><button class="window-btn" id="window-max" title="最大化">□</button><button class="window-btn window-close" id="window-close" title="关闭">✕</button></div>
+  </div>
+  <div class="inputrow">
+    <input id="ts" class="ts-input" type="text" spellcheck="false" autocomplete="off"
+           placeholder="输入时间戳（秒/毫秒）或日期时间，如 1719936000 或 2026-07-01 12:00" />
+  </div>
+  <div class="tzrow">
+    <span class="tzlabel">时区</span>
+    <select id="tz">
+      <option value="local" selected>本地</option>
+      <option value="0">UTC (±0)</option>
+      <option value="1">UTC+1</option>
+      <option value="8">UTC+8 (北京)</option>
+      <option value="-5">UTC-5 (纽约)</option>
+      <option value="-8">UTC-8 (洛杉矶)</option>
+      <option value="9">UTC+9 (东京)</option>
+      <option value="-3">UTC-3 (圣保罗)</option>
+      <option value="5.5">UTC+5:30 (印度)</option>
+    </select>
+    <span id="tz-now" style="margin-left:auto;font-size:12px;color:var(--dim)"></span>
+  </div>
+  <div class="results" id="results"></div>
+  <div class="foot">
+    <span>双击任意结果即可复制 · 秒/毫秒自动识别 · 支持 ISO / 中文日期</span>
+    <span class="sp"></span>
+    <span>Esc 关闭</span>
+  </div>
+
+  <script>
+    const tsEl = document.getElementById("ts");
+    const resultsEl = document.getElementById("results");
+    const statusEl = document.getElementById("status");
+    const tzSel = document.getElementById("tz");
+    const tzNowEl = document.getElementById("tz-now");
+    const windowMin = document.getElementById("window-min"), windowMax = document.getElementById("window-max"), windowClose = document.getElementById("window-close");
+    windowMin.onclick = () => void uTools.noteWindowMinimize();
+    windowMax.onclick = () => void uTools.noteWindowToggleMaximize();
+    windowClose.onclick = () => void uTools.closeDetail();
+    uTools.onNoteWindowState((maximized) => { windowMax.textContent = maximized ? "❐" : "□"; windowMax.title = maximized ? "还原" : "最大化"; });
+
+    const setStatus = (s) => { statusEl.textContent = s; };
+
+    // --- parse input (same logic as main.js) ---
+    function parseInput(raw) {
+      const s = String(raw == null ? "" : raw).trim();
+      if (!s) return null;
+
+      // Numeric timestamp
+      const numMatch = /^([+-]?\d+)(?:\.(\d+))?$/.exec(s);
+      if (numMatch) {
+        const intPart = numMatch[1];
+        const decPart = numMatch[2] || "";
+        const digits = intPart.replace(/^[+-]/, "");
+        if (decPart) {
+          const value = parseFloat(s);
+          if (!isFinite(value) || Math.abs(value) < 1e6) return null;
+          return new Date(value * 1000);
+        }
+        if (digits.length >= 13 || (digits.length >= 12 && BigInt(digits) >= BigInt("1000000000000"))) {
+          const v = BigInt(intPart);
+          if (v < 0n || v > 8640000000000000n) return null;
+          return new Date(Number(v));
+        }
+        const value = parseInt(intPart, 10);
+        if (!isFinite(value) || value < 0 || value > 86400000000) return null;
+        return new Date(value * 1000);
+      }
+
+      // Date-time strings
+      return tryParseDateTime(s);
+    }
+
+    function tryParseDateTime(s) {
+      const norm = s
+        .replace(/年/g, "-")
+        .replace(/月/g, "-")
+        .replace(/日/g, "")
+        .replace(/时/g, " ")
+        .replace(/分/g, ":")
+        .replace(/秒/g, "")
+        .trim();
+
+      const native = new Date(norm);
+      if (!isNaN(native.getTime()) && /\d/.test(norm)) return native;
+
+      const m1 = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(norm);
+      if (m1) {
+        const dt = new Date(+m1[1], +m1[2] - 1, +m1[3], +(m1[4] || 0), +(m1[5] || 0), +(m1[6] || 0));
+        if (!isNaN(dt.getTime())) return dt;
+      }
+
+      const m2 = /^(\d{1,2})[/](\d{1,2})[/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(norm);
+      if (m2) {
+        let mo = +m2[1], d = +m2[2];
+        if (mo > 12 && d <= 12) { mo = +m2[2]; d = +m2[1]; }
+        const dt = new Date(+m2[3], mo - 1, d, +(m2[4] || 0), +(m2[5] || 0), +(m2[6] || 0));
+        if (!isNaN(dt.getTime())) return dt;
+      }
+      return null;
+    }
+
+    function getTzOffsetHours() {
+      const v = tzSel.value;
+      if (v === "local") return new Date().getTimezoneOffset() / -60;
+      return parseFloat(v);
+    }
+
+    function formatInTz(date, tzOffsetHours) {
+      const utcMs = date.getTime() + tzOffsetHours * 3600000;
+      const d = new Date(utcMs);
+      const y = d.getUTCFullYear();
+      const mo = String(d.getUTCMonth() + 1).padStart(2, "0");
+      const da = String(d.getUTCDate()).padStart(2, "0");
+      const h = String(d.getUTCHours()).padStart(2, "0");
+      const mi = String(d.getUTCMinutes()).padStart(2, "0");
+      const se = String(d.getUTCSeconds()).padStart(2, "0");
+      return `${y}-${mo}-${da} ${h}:${mi}:${se}`;
+    }
+
+    const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+    function weekdayName(date) { return WEEKDAYS[date.getDay()]; }
+
+    function toIsoLocal(date, tzOffsetHours) {
+      const str = formatInTz(date, tzOffsetHours);
+      // "YYYY-MM-DD HH:mm:ss" -> "YYYY-MM-DDTHH:mm:ss"
+      return str.replace(" ", "T");
+    }
+
+    // --- render ---
+    function render() {
+      resultsEl.replaceChildren();
+      const typed = tsEl.value.trim();
+      if (!typed) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        const message = document.createElement("span");
+        message.textContent = "输入时间，即时转换多种格式";
+        const tip = document.createElement("small");
+        tip.textContent = "支持秒、毫秒、ISO 和中文日期";
+        empty.append(message, tip);
+        resultsEl.appendChild(empty);
+        return;
+      }
+      const d = parseInput(typed);
+      if (!d) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        const message = document.createElement("span");
+        message.textContent = `「${typed}」无法识别，请检查格式`;
+        const tip = document.createElement("small");
+        tip.textContent = "例如 1719936000 或 2026-07-01 12:00";
+        empty.append(message, tip);
+        resultsEl.appendChild(empty);
+        return;
+      }
+      const tzOff = getTzOffsetHours();
+      const sec = Math.floor(d.getTime() / 1000);
+      const ms = d.getTime();
+
+      const rows = [
+        { label: `UTC${tzOff >= 0 ? "+" : ""}${tzOff} 日期时间`, value: formatInTz(d, tzOff) + " " + weekdayName(d), primary: true },
+        { label: "Unix 时间戳（秒）", value: String(sec) },
+        { label: "Unix 时间戳（毫秒）", value: String(ms) },
+        { label: "ISO 8601（本地）", value: toIsoLocal(d, tzOff) },
+        { label: "ISO 8601（UTC）", value: d.toISOString().replace(".000Z", "Z") },
+        { label: "RFC 2822", value: d.toUTCString().replace("GMT", "UTC") },
+      ];
+
+      for (const r of rows) {
+        const el = document.createElement("div");
+        el.className = "row" + (r.primary ? " primary" : "");
+        el.dataset.copy = r.value;
+        el.title = "双击复制";
+        const label = document.createElement("div");
+        label.className = "label";
+        label.textContent = r.label;
+        const val = document.createElement("div");
+        val.className = "value";
+        val.textContent = r.value;
+        el.append(label, val);
+        resultsEl.appendChild(el);
+      }
+    }
+
+    tsEl.addEventListener("input", render);
+    tzSel.addEventListener("change", render);
+
+    resultsEl.addEventListener("dblclick", (e) => {
+      const row = e.target && e.target.closest ? e.target.closest(".row") : null;
+      if (row) void copyValue(row);
+    });
+
+    async function copyValue(row) {
+      const text = row.dataset.copy || "";
+      if (!text) return;
+      try {
+        await uTools.copyText(text);
+        flash(row, text);
+      } catch (err) {
+        setStatus("复制失败: " + (err && err.message ? err.message : err));
+      }
+    }
+
+    function flash(row, text) {
+      if (row._flash) window.clearTimeout(row._flash);
+      const val = row.querySelector(".value");
+      row.classList.add("copied");
+      val.textContent = text + "   ✓ 已复制";
+      row._flash = window.setTimeout(() => {
+        row.classList.remove("copied");
+        val.textContent = text;
+      }, 900);
+    }
+
+    // --- current time ticker ---
+    let ticker = null;
+    function startTicker() {
+      const tick = () => {
+        const tzOff = getTzOffsetHours();
+        tzNowEl.textContent = "现在 " + formatInTz(new Date(), tzOff);
+      };
+      tick();
+      ticker = window.setInterval(tick, 1000);
+    }
+
+    document.getElementById("now").onclick = () => {
+      tsEl.value = String(Math.floor(Date.now() / 1000));
+      render();
+      tsEl.focus();
+      setStatus("已填入当前时间戳");
+    };
+
+    document.getElementById("clear").onclick = () => {
+      tsEl.value = "";
+      render();
+      tsEl.focus();
+      setStatus("已清空");
+    };
+
+    document.getElementById("paste").onclick = async () => {
+      try {
+        const text = await uTools.getClipboardText();
+        if (!text || !parseInput(text)) {
+          setStatus("剪贴板里没有可识别的时间/时间戳");
+          return;
+        }
+        tsEl.value = String(text).trim();
+        render();
+        tsEl.focus();
+        setStatus("已从剪贴板读取");
+      } catch (err) {
+        setStatus("读剪贴板失败: " + (err && err.message ? err.message : err));
+      }
+    };
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      startTicker();
+      let ctx = null;
+      try { ctx = await uTools.getDetailContext(); } catch (_) { /* ignore */ }
+      const item = ctx && ctx.item ? ctx.item : null;
+      const fromSearch = item && item.data ? String(item.data.value || "") : "";
+      if (fromSearch && parseInput(fromSearch)) {
+        tsEl.value = fromSearch;
+        render();
+        tsEl.focus();
+        setStatus("来自搜索的输入");
+        return;
+      }
+      // Auto-read clipboard
+      try {
+        const clip = await uTools.getClipboardText();
+        const text = String(clip == null ? "" : clip).trim();
+        if (text && text.length <= 40 && parseInput(text)) {
+          tsEl.value = text;
+          render();
+          tsEl.focus();
+          setStatus("已自动读取剪贴板");
+          return;
+        }
+      } catch (_) { /* clipboard unavailable */ }
+      render();
+      tsEl.focus();
+      setStatus("就绪");
+    });
+  </script>
+</body>
+</html>

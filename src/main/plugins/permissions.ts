@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import { pluginDataDir } from "./manifest";
+import { readState, writeState } from "../database";
 
 /**
  * Directory authorization table + path validation.
@@ -31,9 +32,14 @@ let file: string;
 export function initPermissions(): void {
  file = path.join(app.getPath("userData"), "plugin-permissions.json");
  try {
-  const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+  let raw = readState<unknown>("app", "plugin-permissions");
+  if (!raw) {
+   raw = JSON.parse(fs.readFileSync(file, "utf8"));
+   writeState("app", "plugin-permissions", raw);
+  }
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-   const candidate = raw.schemaVersion === 1 ? raw.grants : raw;
+   const objectRaw = raw as { schemaVersion?: number; grants?: unknown };
+   const candidate = objectRaw.schemaVersion === 1 ? objectRaw.grants : raw;
    table = candidate && typeof candidate === "object" && !Array.isArray(candidate)
     ? candidate as GrantTable : {};
   }
@@ -43,12 +49,9 @@ export function initPermissions(): void {
 }
 
 function persist(): void {
- const temp = `${file}.${process.pid}.tmp`;
  try {
-  fs.writeFileSync(temp, JSON.stringify({ schemaVersion: 1, grants: table }, null, 2), { encoding: "utf8", mode: 0o600 });
-  fs.renameSync(temp, file);
+  writeState("app", "plugin-permissions", { schemaVersion: 1, grants: table });
  } catch (e) {
-  try { fs.unlinkSync(temp); } catch { /* ignore */ }
   console.error("[permissions] failed to persist", e);
  }
 }

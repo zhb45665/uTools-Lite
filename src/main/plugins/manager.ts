@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { BrowserWindow, app, shell } from "electron";
+import { BrowserWindow, app, ipcMain, shell } from "electron";
 import {
   Ipc,
   PluginInfo,
@@ -20,10 +20,13 @@ import { ApiServer, GateContext } from "./api-server";
 import { PluginSandbox } from "./sandbox";
 import { authorizeDir, initPermissions } from "./permissions";
 import { setCredentialWindow } from "../launcher-window";
+import { toPinyin, toPinyinInitials } from "../pinyin-match";
 import {
   openNoteWindow,
+  openStandalonePluginWindow,
   isNoteWindowOpen,
   getNoteWindow,
+  standaloneWindowPluginId,
 } from "../note-window";
 
 /**
@@ -113,7 +116,7 @@ export class PluginManager {
    */
   private permSuspend = 0;
   /** Guards against re-entrant beforeClose negotiations. */
-  private closingDetail = false;
+  private closingDetailPromise: Promise<boolean> | null = null;
   private reapTimer: NodeJS.Timeout | null = null;
   private shutDown = false;
   private getWin: () => BrowserWindow | null;
@@ -240,7 +243,53 @@ export class PluginManager {
    */
   async searchPlugins(query: string): Promise<SearchItem[]> {
     const hit = this.matchQuery(query);
-    if (!hit) return [];
+    if (!hit) {
+      const q = query.trim().toLocaleLowerCase();
+      if (!q) return [];
+      return [...this.manifests.values()]
+        .map((m) => {
+          const name = m.name.toLocaleLowerCase();
+          const description = (m.description ?? "").toLocaleLowerCase();
+          const id = m.id.toLocaleLowerCase();
+          const keywords = m.keywords.map((k) => k.toLocaleLowerCase());
+          const combined = [m.name, m.description ?? "", ...m.keywords].join(" ");
+          const fullPinyin = toPinyin(combined).toLocaleLowerCase();
+          const initials = toPinyinInitials(combined).toLocaleLowerCase();
+          let score = 0;
+          if (name === q) score = Math.max(score, 1000);
+          else if (name.startsWith(q)) score = Math.max(score, 920);
+          else if (name.includes(q)) score = Math.max(score, 840);
+          if (keywords.some((k) => k === q)) score = Math.max(score, 970);
+          else if (keywords.some((k) => k.startsWith(q))) score = Math.max(score, 890);
+          else if (keywords.some((k) => k.includes(q))) score = Math.max(score, 810);
+          if (id === q) score = Math.max(score, 900);
+          else if (id.startsWith(q)) score = Math.max(score, 800);
+          else if (id.includes(q)) score = Math.max(score, 720);
+          if (fullPinyin.startsWith(q)) score = Math.max(score, 860);
+          else if (fullPinyin.includes(q)) score = Math.max(score, 760);
+          if (initials.startsWith(q)) score = Math.max(score, 850);
+          else if (initials.includes(q)) score = Math.max(score, 740);
+          if (description.includes(q)) score = Math.max(score, 650);
+          return { m, score };
+        })
+        .filter(({ score }) => score > 0)
+        .sort((a, b) => b.score - a.score || a.m.name.localeCompare(b.m.name, "zh-CN"))
+        .slice(0, 8)
+        .map(({ m }) => ({
+          id: `plugin:${m.id}:home`,
+          type: "plugin" as const,
+          title: m.name,
+          subtitle: m.description ?? "回车打开工具",
+          icon: m.icon ?? "🧩",
+          payload: m.name,
+          pluginId: m.id,
+          raw: {
+            keyword: m.keywords[0] ?? m.id,
+            value: "",
+            data: { action: "home" },
+          },
+        }));
+    }
     const m = this.manifests.get(hit.pluginId);
     if (!m) return [];
     try {
@@ -307,36 +356,28 @@ export class PluginManager {
     };
 
     if (m.detail) {
-      // Notes plugin: open in a standalone resizable window instead of the
-      // inline iframe. The main launcher keeps its compact fixed size; the
-      // note editor gets its own native-title-bar window the user can drag,
-      // resize, minimize, maximize, and close.
-      if (m.id === "notes") {
-        openNoteWindow({
+      // Every detail plugin opens in the shared standalone tool window. The
+      // launcher remains a compact search surface and never embeds details.
+      const openWindow = m.id === "notes" ? openNoteWindow : (ctx: {
+        keyword: string;
+        value: string;
+        item: unknown;
+      }) => openStandalonePluginWindow({
+        pluginId: m.id,
+        pluginName: m.name,
+        detail: m.detail!,
+        ...ctx,
+      });
+      openWindow({
           keyword,
           value,
-          item: { text: item.title, icon: item.icon, description: item.subtitle, data: raw.data },
-        });        // Best-effort warm start so main.js state is ready when the view opens.
-        void this.ensureLoaded(m).catch(() => {});
-        return {
-          openedDetail: {
-            pluginId: m.id,
-            pluginName: m.name,
-            detail: m.detail,
+          item: {
+            text: item.title,
+            icon: item.icon,
+            description: item.subtitle,
+            data: raw.data,
           },
-        };
-      }
-
-      setCredentialWindow(m.id === "password");
-      this.activeDetail = {
-        pluginId: m.id,
-        keyword,
-        value,
-        item: pluginItem,
-        ready: false,
-        frameId: null,
-      };
-      this.detailQueue = [];
+        });
       // Best-effort warm start so main.js state is ready when the view opens.
       void this.ensureLoaded(m).catch(() => {});
       return {
@@ -367,6 +408,17 @@ export class PluginManager {
     };
   }
 
+  /** Record the [processId, routingId] of the plugin iframe. `null`
+   *  deliberately clears it so the next send falls back to the top frame
+   *  (which the top frame answers by forwarding into the inline iframe).
+   *  A stale routing id from a previous mount would otherwise send
+   *  events to a dead frame and lose them silently. */
+  markDetailFrame(frameId: [number, number] | null): void {
+    const d = this.activeDetail;
+    if (!d) return;
+    d.frameId = frameId;
+  }
+
   markDetailReady(frameId?: [number, number] | null): void {
     const d = this.activeDetail;
     if (!d) return;
@@ -385,27 +437,51 @@ export class PluginManager {
     const wc = this.getWin()?.webContents;
     if (!wc) return;
     const payload = { pluginId, data: data ?? null };
+    this.sendToDetailFrame(wc, Ipc.EvtDetailMessage, payload);
+  }
+
+  /**
+   * Send an event to the active detail view. Prefers sendToFrame() with the
+   * last known plugin-iframe routing id; if that id is stale (frame
+   * navigated / remounted) sendToFrame may silently DROP the message, so
+   * ALSO send to the top frame as a safety net. The top frame answers
+   * lifecycle events (beforeClose) by forwarding them into the inline
+   * iframe (see App.tsx / preload onDetailBeforeCloseRequest), and answer
+   * handlers are id-filtered + once-settling, so a duplicate delivery is
+   * harmless. */
+  private sendToDetailFrame(
+    wc: Electron.WebContents,
+    channel: string,
+    ...args: unknown[]
+  ): void {
     const frameId = this.activeDetail?.frameId;
     if (frameId) {
       try {
-        wc.sendToFrame(frameId, Ipc.EvtDetailMessage, payload);
+        wc.sendToFrame(frameId, channel, ...args);
       } catch {
-        // frame navigated away mid-send: nothing to deliver to
+        /* frame gone — the top-frame send below still reaches the page */
       }
-    } else {
-      wc.send(Ipc.EvtDetailMessage, payload);
+    }
+    try {
+      wc.send(channel, ...args);
+    } catch {
+      /* webContents gone; nothing to do */
     }
   }
 
   /** Detail frame -> plugin main.js message.
    *  `sourceWin` disambiguates when the message comes from the standalone
-   *  note window (vs the main launcher's inline iframe): the note window
-   *  has no activeDetail entry, so we route straight to the notes sandbox. */
-  detailSend(data: unknown, frameId?: [number, number] | null, sourceWin?: BrowserWindow | null): void {
+   *  standalone plugin window (vs the main launcher's inline iframe). */
+  detailSend(
+    data: unknown,
+    frameId?: [number, number] | null,
+    sourceWin?: BrowserWindow | null,
+  ): void {
     // Standalone note window: route directly to the notes sandbox, bypassing
     // activeDetail (which is bound to the main launcher's inline iframe).
     if (sourceWin) {
-      const m = this.manifests.get("notes");
+      const pluginId = standaloneWindowPluginId();
+      const m = pluginId ? this.manifests.get(pluginId) : null;
       if (!m) return;
       void this.ensureLoaded(m)
         .then((sb) => {
@@ -414,7 +490,7 @@ export class PluginManager {
         .catch((e) => {
           const request = data as { requestId?: number } | null;
           sourceWin?.webContents.send(Ipc.EvtDetailMessage, {
-            pluginId: "notes",
+            pluginId: pluginId ?? "",
             data: {
               type: "res",
               requestId: request?.requestId,
@@ -480,33 +556,35 @@ export class PluginManager {
   /**
    * beforeClose negotiation (retention plan 阶段二). Asks the detail iframe
    * whether it allows closing; the page decides (e.g. confirm unsaved
-   * changes). Timeout => allow close (safe policy, logged).
+   * changes). Timeout keeps the view open because save state is unknown.
    */
   private negotiateBeforeClose(d: ActiveDetail): Promise<boolean> {
     const wc = this.getWin()?.webContents;
-    if (!wc || this.closingDetail) return Promise.resolve(true);
-    this.closingDetail = true;
+    if (!wc || wc.isDestroyed()) return Promise.resolve(false);
+    if (this.closingDetailPromise) return this.closingDetailPromise;
     const reqIdCurrent = Date.now() + Math.floor(Math.random() * 1000);
-    // SAFETY: Electron's d.ts types only a subset of WebContents events;
-    // custom ipcRenderer channel names are valid events at runtime, so the
-    // casts here only silence the incomplete event-name union and listener
-    // signature. The listener receives (event, reqId, allow) at runtime.
-    const closeResultEvent = Ipc.DetailCloseResult as unknown as "zoom-changed";
-    return new Promise<boolean>((resolve) => {
+    const negotiation = new Promise<boolean>((resolve) => {
       let settled = false;
-      // SAFETY: single reference so removeListener gets the same function
-      // identity that wc.on received (listener equality is by reference).
-      const onResult = (_e: unknown, reqId: number, allow: boolean) => {
-        if (reqId === reqIdCurrent) settle(Boolean(allow), "page answer");
+      let timer: NodeJS.Timeout | null = null;
+      // Answers can arrive from the plugin frame itself (sendToFrame path)
+      // OR from the top frame (which forwards the request into the inline
+      // iframe and answers on its behalf). Accept both — the first answer
+      // wins and settles the negotiation.
+      const onResult = (
+        _event: Electron.IpcMainEvent,
+        reqId: number,
+        allow: boolean,
+      ) => {
+        if (reqId === reqIdCurrent) {
+          settle(Boolean(allow), "page answer");
+        }
       };
-      // SAFETY: the listener is wider than the d.ts zoom-changed signature;
-      // the cast keeps a single function reference for add/remove identity.
-      const onResultAny = onResult as unknown as (event: unknown) => void;
       const settle = (allow: boolean, reason: string) => {
         if (settled) return;
         settled = true;
-        wc.removeListener(closeResultEvent, onResultAny);
-        this.closingDetail = false;
+        if (timer) clearTimeout(timer);
+        ipcMain.removeListener(Ipc.DetailCloseResult, onResult);
+        wc.removeListener("destroyed", onWebContentsGone);
         if (!allow) {
           console.log(
             `[plugins] beforeClose denied for ${d.pluginId}: ${reason}`,
@@ -514,25 +592,27 @@ export class PluginManager {
         }
         resolve(allow);
       };
-      // SAFETY: listener arity (3) is intentionally wider than the d.ts
-      // zoom-changed signature; extra runtime args are simply ignored.
-      wc.on(closeResultEvent, onResultAny);
-      const timer = setTimeout(() => {
-        settle(true, "timeout (closed per safe policy)");
+      const onWebContentsGone = () => settle(false, "webContents destroyed");
+      ipcMain.on(Ipc.DetailCloseResult, onResult);
+      wc.once("destroyed", onWebContentsGone);
+      timer = setTimeout(() => {
+        // A page that never answers (no onBeforeClose hook + lost event,
+        // dead frame, slow JS) must not trap the user in the detail view
+        // forever. Treat timeout as ALLOW: the page's onDetailClose save
+        // hooks have already flushed on the close path, and the top frame
+        // answers the forwarded request with its own backstop timeout.
+        settle(true, "timeout (allowed — unanswered page cannot wedge close)");
       }, BEFORE_CLOSE_TIMEOUT_MS);
       timer.unref?.();
-      try {
-        const frameId = d.frameId;
-        if (frameId) {
-          wc.sendToFrame(frameId, Ipc.EvtDetailBeforeClose, reqIdCurrent);
-        } else {
-          wc.send(Ipc.EvtDetailBeforeClose, reqIdCurrent);
-        }
-      } catch {
-        clearTimeout(timer);
-        settle(true, "frame gone (closed per safe policy)");
+      this.sendToDetailFrame(wc, Ipc.EvtDetailBeforeClose, reqIdCurrent);
+    });
+    this.closingDetailPromise = negotiation;
+    void negotiation.finally(() => {
+      if (this.closingDetailPromise === negotiation) {
+        this.closingDetailPromise = null;
       }
     });
+    return negotiation;
   }
 
   /** Store a focus/scroll snapshot from the top frame, forwarded to the detail iframe. */
@@ -718,7 +798,7 @@ export class PluginManager {
         // Notes plugin: when the standalone note window is open, route
         // main.js -> detail messages there instead of the main launcher's
         // inline iframe (which has no notes detail mounted).
-        if (pluginId === "notes") {
+        if (pluginId === standaloneWindowPluginId()) {
           if (isNoteWindowOpen()) {
             // Send directly to the note window's webContents.
             // SAFETY: the note window is a top-level frame (not an iframe
@@ -726,7 +806,7 @@ export class PluginManager {
             const nw = getNoteWindow();
             if (nw && !nw.isDestroyed()) {
               nw.webContents.send(Ipc.EvtDetailMessage, {
-                pluginId: "notes",
+                pluginId,
                 data: evt.params.data,
               });
             }

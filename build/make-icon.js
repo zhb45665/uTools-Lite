@@ -5,6 +5,15 @@ const fs = require("fs");
 const zlib = require("zlib");
 const path = require("path");
 
+// Preserve the approved AI-designed assets on later builds. The procedural
+// renderer below is only a fallback when a checkout is missing either file.
+const approvedIcon = path.join(__dirname, "icon.png");
+const approvedTray = path.join(__dirname, "tray-icon.png");
+if (fs.existsSync(approvedIcon) && fs.existsSync(approvedTray)) {
+  console.log("using approved icon assets");
+  process.exit(0);
+}
+
 let crcTable;
 function makeCrcTable() {
   crcTable = new Int32Array(256);

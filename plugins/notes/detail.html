@@ -305,26 +305,43 @@
       display: flex;
       gap: 14px;
     }
+
+    /* Shared visual language with the credential vault. */
+    :root {
+      --bg: #f1f4f8; --panel: #fff; --text: #182333;
+      --dim: #69778a; --faint: #8b97a7; --divider: #dce3ec;
+      --input-text: #182333; --btn-soft: #f4f7fb; --accent: #2864c7;
+      --active: #e9f1ff; --danger: #c7434d; --code-bg: #eef3f9;
+    }
+    body { font-family: "Segoe UI Variable","Microsoft YaHei UI",sans-serif; letter-spacing:.01em; }
+    .topbar { min-height:60px; padding:9px 7px 9px 18px; gap:12px; flex-wrap:nowrap; background:color-mix(in srgb,var(--panel) 94%,var(--accent) 6%); -webkit-app-region:drag; user-select:none; box-shadow:0 1px 0 var(--divider); }
+    .topbar button,.topbar .window-controls { -webkit-app-region:no-drag; }
+    .note-brand { display:flex; align-items:center; gap:10px; min-width:0; }
+    .note-brand-mark { width:38px; height:38px; display:grid; place-items:center; border-radius:11px; background:var(--accent); color:#fff; font-size:18px; box-shadow:0 7px 18px #2864c733; }
+    .note-brand-copy { display:flex; flex-direction:column; min-width:0; }.note-brand-copy strong { font-size:16px; }.note-brand-copy small { color:var(--dim); font-size:11px; }
+    .topbar .status { padding-left:12px; border-left:1px solid var(--divider); white-space:nowrap; }
+    .window-controls { align-self:stretch; display:flex; align-items:center; margin-left:5px; padding-left:6px; border-left:1px solid var(--divider); -webkit-app-region:no-drag; }
+    .window-controls .window-btn { width:38px; height:32px; padding:0; border:0; border-radius:7px; background:transparent; color:var(--dim); display:grid; place-items:center; font-size:13px; }
+    .window-controls .window-btn:hover { background:var(--btn-soft); color:var(--text); }.window-controls .window-close:hover { background:var(--danger); color:#fff; }
+    .toolbar { padding:7px 14px; background:var(--panel); }.toolbar .tb-btn { border-color:transparent; background:var(--btn-soft); border-radius:7px; }
+    .sidebar { width:310px; min-width:250px; padding-top:8px; background:#f8fafc; }.search { padding:10px 14px 8px; }.search input { height:38px; padding:8px 11px; background:var(--panel); }
+    .groups { padding:3px 8px 14px; }.group-label { padding:10px 9px 5px; font-weight:600; }.note-item { margin-bottom:5px; padding:10px 11px; border:1px solid transparent; border-left-width:3px; border-radius:9px; transition:background .12s ease,border-color .12s ease,transform .12s ease; }
+    .note-item:hover { background:var(--panel); border-color:var(--divider); transform:translateX(2px); }.note-item.active { border-color:#c8d9fa; border-left-color:var(--accent); box-shadow:0 4px 14px #20324a0c; }
+    .editor { background:var(--panel); }.editor-head { min-height:48px; padding:7px 18px; }.editor-head .cur-title { font-size:15px; }
+    textarea { padding:22px 26px 34px; font:14px/1.78 "Cascadia Code","Microsoft YaHei UI",monospace; }.preview { padding:22px 30px 44px; background:var(--panel); }
+    .foot { min-height:34px; align-items:center; padding:7px 18px; background:var(--panel); }
+    @media (prefers-color-scheme: dark) { :root { --bg:#161c26; --panel:#202834; --text:#edf2fa; --dim:#a1aec0; --faint:#7f8da1; --divider:#354153; --input-text:#edf2fa; --btn-soft:#283343; --accent:#8fb4ff; --active:#293b59; --danger:#ff8c96; --code-bg:#283343; } .sidebar { background:#1b222d; }.topbar { background:var(--panel); }.note-brand-mark { color:#182333; box-shadow:none; } }
+    @media (prefers-reduced-motion:reduce) { * { transition:none!important; } }
   </style>
 </head>
 <body>
-  <!-- 自定义标题栏：仅独立无边框笔记窗口显示（JS 加 .standalone 类）。
-       整条 -webkit-app-region: drag 可拖拽窗口，按钮区 no-drag 恢复点击。 -->
-  <div class="titlebar" id="titlebar">
-    <span class="tb-title">📝 随手笔记</span>
-    <span class="tb-btns">
-      <button class="tb-btn" id="tbMin" title="最小化">─</button>
-      <button class="tb-btn" id="tbMax" title="最大化 / 还原">□</button>
-      <button class="tb-btn close" id="tbClose" title="关闭">✕</button>
-    </span>
-  </div>
-
   <div class="topbar">
-    <span class="title">📝 随手笔记</span>
+    <div class="note-brand"><span class="note-brand-mark">✎</span><div class="note-brand-copy"><strong>随手笔记</strong><small>本地 Markdown 工作区</small></div></div>
     <span class="status" id="status">加载中…</span>
     <span class="spacer"></span>
     <button class="secondary" id="restoreBtn" style="display:none" title="用 .prev.md 备份覆盖当前内容">⏪ 恢复上一版</button>
     <button class="secondary" id="new">＋ 新建</button>
+    <div class="window-controls" aria-label="窗口控制"><button class="window-btn" id="tbMin" title="最小化" aria-label="最小化">─</button><button class="window-btn" id="tbMax" title="最大化" aria-label="最大化">□</button><button class="window-btn window-close" id="tbClose" title="关闭" aria-label="关闭">✕</button></div>
   </div>
 
   <div class="toolbar" id="toolbar">
@@ -396,6 +413,8 @@
     let dirty = false;
     let saving = false;
     let saveTimer = null;
+    let saveSequence = 0;
+    const pendingSaves = new Map();
     let filterText = "";
     let previewMode = false;
 
@@ -613,24 +632,42 @@
       if (saveTimer) { window.clearTimeout(saveTimer); saveTimer = null; }
       if (currentId === null && ta.value.trim() === "") { dirty = false; return; }
       if (saving) {
-        // 上一次保存还在途：排队再试一次，避免丢失本次改动
-        saveTimer = window.setTimeout(() => { saveTimer = null; void flushSave(); }, 300);
-        return;
+        // 等当前磁盘写入回包；若期间还有编辑，调用方随后会再保存一轮。
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+        return flushSave();
       }
       saving = true;
-      dirty = false;
       saveStateEl.textContent = "保存中…";
+      const content = ta.value;
+      const requestId = "note-save-" + Date.now() + "-" + (++saveSequence);
       try {
-        // 新建时 id=null；main.js 会分配并回发 saved(带最终 id)
-        await uTools.sendMainMessage({ type: "save", id: currentId, content: ta.value });
+        // sendMainMessage 只表示消息已转发；必须等待后台完成原子写入后的 saved 回包。
+        const saved = new Promise((resolve, reject) => {
+          const timer = window.setTimeout(() => {
+            pendingSaves.delete(requestId);
+            reject(new Error("等待磁盘保存确认超时"));
+          }, 10000);
+          pendingSaves.set(requestId, {
+            resolve: (msg) => { window.clearTimeout(timer); resolve(msg); },
+            reject: (error) => { window.clearTimeout(timer); reject(error); },
+          });
+        });
+        const [, result] = await Promise.all([
+          uTools.sendMainMessage({ type: "save", id: currentId, content, requestId }),
+          saved,
+        ]);
+        if (currentId === null && result.id) currentId = result.id;
+        dirty = ta.value !== content;
+        if (!dirty) saveStateEl.textContent = "已保存 " + new Date(result.at).toLocaleTimeString();
       } catch (e) {
         dirty = true;
         saveStateEl.textContent = "保存失败";
         setStatus("保存失败: " + (e.message || e));
       } finally {
+        pendingSaves.delete(requestId);
         saving = false;
-        if (!dirty) saveStateEl.textContent = "已保存 " + new Date().toLocaleTimeString();
       }
+      if (dirty && ta.value !== content) return flushSave();
     }
 
     // ---------- 删除 / 恢复 ----------
@@ -783,10 +820,17 @@
         }
         renderList();
       } else if (msg.type === "saved") {
+        const pending = msg.requestId && pendingSaves.get(msg.requestId);
+        if (pending) {
+          pendingSaves.delete(msg.requestId);
+          pending.resolve(msg);
+        }
         if (currentId === null) currentId = msg.id; // 新建后拿到 id
         else if (currentId && msg.id && currentId !== msg.id) currentId = msg.id;
-        dirty = false;
-        if (!saving) saveStateEl.textContent = "已保存 " + new Date(msg.at).toLocaleTimeString();
+        if (!saving) {
+          dirty = false;
+          saveStateEl.textContent = "已保存 " + new Date(msg.at).toLocaleTimeString();
+        }
         if (currentId) restoreBtn.style.display = "inline-block";
       } else if (msg.type === "restored" && msg.id === currentId) {
         ta.value = msg.content || "";
@@ -797,6 +841,11 @@
       } else if (msg.type === "restore-error") {
         setStatus(msg.error || "恢复失败");
       } else if (msg.type === "save-error") {
+        const pending = msg.requestId && pendingSaves.get(msg.requestId);
+        if (pending) {
+          pendingSaves.delete(msg.requestId);
+          pending.reject(new Error(msg.error || "保存失败"));
+        }
         dirty = true;
         saveStateEl.textContent = "保存失败";
         setStatus("保存失败: " + msg.error);
@@ -823,7 +872,7 @@
       }
     });
     // 兜底：窗口 blur 隐藏很快，onDetailClose 再 flush 一次
-    uTools.onDetailClose(() => { void flushSave(); });
+    uTools.onDetailClose(() => flushSave());
 
     // ---------- 初始化 ----------
     window.addEventListener("DOMContentLoaded", async () => {
@@ -833,11 +882,9 @@
       // 无条件显示，不需要任何"独立/内嵌"区分判断（process.isMainFrame /
       // URL query / IPC 身份事件都不可靠或有时序问题）。
       {
-        const titlebar = document.getElementById("titlebar");
         const tbMin = document.getElementById("tbMin");
         const tbMax = document.getElementById("tbMax");
         const tbClose = document.getElementById("tbClose");
-        if (titlebar) titlebar.classList.add("standalone");
         if (tbMin) tbMin.onclick = () => { void uTools.noteWindowMinimize(); };
         if (tbMax) tbMax.onclick = () => { void uTools.noteWindowToggleMaximize(); };
         if (tbClose) tbClose.onclick = () => { void uTools.closeDetail(); };

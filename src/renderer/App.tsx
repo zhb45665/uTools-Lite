@@ -20,7 +20,7 @@ import {
 function buildFlat(res: SearchResponse): SearchItem[] {
   if (!res) return [];
   // 优先级策略：
-  // - 普通搜索：命令（计算器/金额/Everything入口）→ 插件 → 文件 → 应用
+  // - 普通搜索：命令（计算器/金额）→ 插件 → 文件 → 应用
   // - 应用命中（appsFirst）：应用 → 插件 → 文件 → 命令
   //   应用是用户主要意图，"在 Everything 中搜索"入口和计算结果降级到后面
   const apps = res.apps ?? [];
@@ -29,7 +29,10 @@ function buildFlat(res: SearchResponse): SearchItem[] {
   const plugins = res.plugins ?? [];
   const appFirst = res.appsFirst && apps.length > 0;
   if (appFirst) {
-    return [...apps, ...plugins, ...files, ...commands];
+    // Plugins are part of the main search scope. When both an installed app
+    // and a plugin match, keep the plugin visible before file noise and let
+    // local usage ranking refine order inside each group.
+    return [...plugins, ...apps, ...files, ...commands];
   }
   return [...commands, ...plugins, ...files, ...apps];
 }
@@ -300,7 +303,7 @@ export default function App() {
             window.clearTimeout(loadingTimerRef.current);
           if (version === searchVersion.current) setLoading(false);
         }
-      }, 120);
+      }, 80);
     },
     [showToast],
   );
@@ -308,13 +311,10 @@ export default function App() {
   const onChange = (e: ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
     setQuery(v);
-    if (!composing.current) doSearch(v);
-    else {
-      searchVersion.current++;
-      if (debounceRef.current) window.clearTimeout(debounceRef.current);
-      if (loadingTimerRef.current) window.clearTimeout(loadingTimerRef.current);
-      setLoading(false);
-    }
+    // Search during IME composition as well. App/plugin matching already
+    // supports pinyin, so users should see results while typing instead of
+    // having to press Enter merely to commit the composition first.
+    doSearch(v);
   };
 
   // Close the detail view through the beforeClose negotiation. The host
@@ -323,13 +323,63 @@ export default function App() {
   // allows (or does not answer within the timeout), the host closes and
   // sends EvtDetailExit, which this component listens to via onDetailExit
   // to actually unmount the iframe.
-  const requestCloseDetail = useCallback(async () => {
-    if (!detail) return;
-    await window.launcher.detailClose();
-    // If the page refused, detailClose returns { closed: false } and the
-    // iframe stays mounted. If it allowed, the host sends EvtDetailExit
-    // and onDetailExit unmounts it — no setDetail(null) needed here.
-  }, [detail]);
+  //
+  // `force` skips the negotiation entirely (detailCloseUnsafe) — the
+  // fallback for a wedged negotiation (dead frame, stuck timer) so the
+  // user can always get back to search.
+  const requestCloseDetail = useCallback(
+    async (force = false) => {
+      if (!detail) return;
+      let closed: boolean | undefined;
+      if (force) {
+        await window.launcher.detailCloseUnsafe();
+        closed = true;
+      } else {
+        const r: { ok: boolean; closed?: boolean } =
+            await window.launcher.detailClose();
+        closed = r?.closed;
+      }
+      // If the page refused, closed:false and the iframe stays mounted.
+      // If it allowed, the host sends EvtDetailExit and onDetailExit
+      // unmounts it — no setDetail(null) needed here.
+      if (!force && closed === false) {
+        // Negotiation refused or failed. First occurrence: the page is
+        // showing its own confirm dialog (e.g. unsaved changes) — wait
+        // for the user. Second attempt within 2.5s (or Esc again):
+        // force-close so a broken page can never trap the user.
+        const now = Date.now();
+        if (closeRefusedAt.current && now - closeRefusedAt.current < 2500) {
+          await window.launcher.detailCloseUnsafe();
+          closeRefusedAt.current = 0;
+        } else {
+          closeRefusedAt.current = now;
+        }
+      } else {
+        closeRefusedAt.current = 0;
+      }
+    },
+    [detail],
+  );
+  const closeRefusedAt = useRef(0);
+
+  // Host -> top frame: "may the detail view close?" The top frame answers
+  // by forwarding the question into the inline plugin iframe via
+  // postMessage (see preload). Without this listener the event only
+  // reaches the TOP frame, which has no beforeClose hooks of its own, and
+  // the 10s host timeout used to DENY the close — leaving the user stuck
+  // in the detail view (the "稿纸关不掉" bug).
+  useEffect(() => {
+    const off = window.launcher.onDetailBeforeCloseRequest((reqId) => {
+      void reqId; // the postMessage round-trip carries its own id; the
+      // host's id is only for its own listener filtering.
+      const frame = iframeRef.current;
+      // No live iframe (e.g. it already unmounted): answer allow so the
+      // close can proceed — there is nothing left to protect.
+      if (!frame) return Promise.resolve(true);
+      return window.launcher.detailFrameBeforeClose(frame);
+    });
+    return off;
+  }, []);
 
   const launch = useCallback(
     async (item: SearchItem) => {
@@ -343,18 +393,17 @@ export default function App() {
           // Notes plugin opens in a standalone resizable window (separate
           // BrowserWindow with a native title bar). The main launcher stays
           // at its compact size — do NOT mount an inline iframe for notes.
-          if (r.openedDetail && r.openedDetail.pluginId !== "notes") {
-            setDetail({
-              pluginId: r.openedDetail.pluginId,
-              pluginName: r.openedDetail.pluginName,
-              src: `plugin://${r.openedDetail.pluginId}/${r.openedDetail.detail}`,
-            });
-          } else if (r.error) {
+          // Detail plugins are hosted by a standalone BrowserWindow. Keep
+          // the compact launcher free of embedded iframes.
+          if (r.error) {
             showToast(r.error);
+          } else {
+            void window.launcher.recordSearchSelection(query, item);
           }
           return;
         }
         const r = await window.launcher.launch(item);
+        if (r.ok && !r.error) void window.launcher.recordSearchSelection(query, item);
         if (item.type === "command" && r.copied) {
           setCopied(r.copied);
           window.setTimeout(() => setCopied(null), 1500);
@@ -364,7 +413,7 @@ export default function App() {
         showToast("打开失败，请重试");
       }
     },
-    [showToast],
+    [showToast, query],
   );
 
   /**
@@ -444,6 +493,7 @@ export default function App() {
   // Esc in the parent frame while a detail view is open (iframe Esc is
   // handled by the plugin-frame preload). Both paths go through the
   // beforeClose negotiation, so unsaved changes are confirmed first.
+  // A second Esc within 2.5s force-closes (see requestCloseDetail).
   useEffect(() => {
     if (!detail) return;
     const onKey = (e: KeyboardEvent) => {
@@ -452,6 +502,21 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [detail, requestCloseDetail, perm]);
+
+  // When the last negotiation was refused (page showing its confirm
+  // dialog, or a wedged page that never answers), surface a small hint
+  // so the user knows how to force their way back to search.
+  const [closeBlocked, setCloseBlocked] = useState(false);
+  useEffect(() => {
+    if (!detail) {
+      setCloseBlocked(false);
+      return;
+    }
+    const t = window.setInterval(() => {
+      setCloseBlocked(closeRefusedAt.current > 0);
+    }, 500);
+    return () => window.clearInterval(t);
+  }, [detail]);
 
   const answerPerm = async (granted: boolean) => {
     if (!perm) return;
@@ -527,9 +592,13 @@ export default function App() {
           <button
             className="detailbar-close"
             onClick={() => void requestCloseDetail()}
-            title="关闭 (Esc)"
+            title={
+              closeBlocked
+                ? "页面拒绝关闭（可能有未保存内容）；再按一次 Esc / 点此强制返回搜索"
+                : "关闭 (Esc)"
+            }
           >
-            返回搜索 · Esc
+            {closeBlocked ? "强制返回搜索" : "返回搜索 · Esc"}
           </button>
         </div>
         <iframe
@@ -585,11 +654,6 @@ export default function App() {
           onKeyDown={onKeyDown}
           onCompositionStart={() => {
             composing.current = true;
-            searchVersion.current++;
-            if (debounceRef.current) window.clearTimeout(debounceRef.current);
-            if (loadingTimerRef.current)
-              window.clearTimeout(loadingTimerRef.current);
-            setLoading(false);
           }}
           onCompositionEnd={(e) => {
             composing.current = false;
@@ -972,14 +1036,9 @@ export default function App() {
         </span>
         <span
           className="index-status"
-          style={{ cursor: "pointer" }}
+          style={{ cursor: fileIndex?.capped ? "pointer" : "default" }}
           onClick={() => {
-            if (info?.everythingAvailable) {
-              void window.launcher.launch({
-                type: "command",
-                payload: query ? `everything:${query}` : "everything:",
-              });
-            } else if (fileIndex?.capped) {
+            if (!info?.everythingAvailable && fileIndex?.capped) {
               void window.launcher.launch({
                 type: "app",
                 payload: "https://www.voidtools.com/zh-cn/",
@@ -988,7 +1047,7 @@ export default function App() {
           }}
           title={
             info?.everythingAvailable
-              ? "已连接本地 Everything，点击直接唤起"
+              ? "Everything 结果会直接显示在当前列表"
               : fileIndex?.capped
                 ? "本地索引已达 600,000 条上限，点击查看 Everything 获取全盘秒搜"
                 : "本地文件索引"
@@ -996,7 +1055,7 @@ export default function App() {
         >
           <i className={fileIndex?.running ? "indexing" : ""} />
           {info?.everythingAvailable
-            ? "Everything 已联动 (点击唤起)"
+            ? "Everything 全盘结果已直接显示"
             : fileIndex
               ? `${fileIndex.running ? "索引中 · " : fileIndex.capped ? "已达上限(点此极速全搜) · " : "已索引 "}${fileIndex.count.toLocaleString()} 个文件`
               : "准备中"}

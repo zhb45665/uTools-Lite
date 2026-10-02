@@ -130,6 +130,14 @@ function buildItems(query) {
       icon: "📝",
       data: { action: "open", id: n.id },
     }));
+    if (!query) {
+      items.unshift({
+        text: "打开随手笔记",
+        description: notes.length ? `${notes.length} 篇笔记 · 独立窗口` : "新建第一篇笔记",
+        icon: "📝",
+        data: { action: "new", value: "" },
+      });
+    }
     if (query) {
       items.push({
         text: `✏️ 新建笔记：${query}`,
@@ -189,7 +197,7 @@ main.onMainMessage(async (msg) => {
         notes[idx].updatedAt = now;
         await main.writeFileAtomic(mdFile(id), msg.content);
         await saveIndex(notes);
-        main.sendMainMessage({ type: "saved", id, at: now });
+        main.sendMainMessage({ type: "saved", id, at: now, requestId: msg.requestId });
         main.toast("笔记已保存 ✅");
       } else {
         // 新建（或索引里找不到 -> 降级新建）
@@ -198,7 +206,7 @@ main.onMainMessage(async (msg) => {
         await main.writeFileAtomic(mdFile(id), msg.content);
         await saveIndex(notes);
         // 先把最终 id 交给 detail，再推全量列表，避免 detail 侧空窗
-        main.sendMainMessage({ type: "saved", id, at: now });
+        main.sendMainMessage({ type: "saved", id, at: now, requestId: msg.requestId });
         main.toast("笔记已创建 ✅");
       }
       await pushListToDetail();
@@ -253,6 +261,7 @@ main.onMainMessage(async (msg) => {
     main.sendMainMessage({
       type: "save-error",
       error: String(e.message || e),
+      requestId: msg && msg.requestId,
     });
   }
 });

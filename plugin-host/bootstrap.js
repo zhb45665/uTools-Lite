@@ -183,6 +183,9 @@ const main = {
       .call("fs.list", { path: String(p) }, 10000)
       .then((r) => r.entries);
   },
+  deleteFile(p) {
+    return rpc.call("fs.delete", { path: String(p) }, 10000).then((r) => r);
+  },
 
   getClipboardText() {
     return rpc.call("clipboard.read", {}, 5000).then((r) => r.text);

@@ -46,6 +46,9 @@ const launcherApi = {
       query,
     ) as Promise<SearchResponse>;
   },
+  recordSearchSelection(query: string, item: SearchItem): Promise<{ ok: boolean }> {
+    return ipcRenderer.invoke(Ipc.SearchRecordSelection, query, item) as Promise<{ ok: boolean }>;
+  },
   launch(
     item: Pick<SearchItem, "payload" | "type">,
   ): Promise<{ ok: boolean; error?: string; copied?: string }> {
@@ -160,9 +163,10 @@ const launcherApi = {
   /** Close the current detail view. Performs the beforeClose negotiation
    *  (unsaved-changes check inside the plugin page) before the host
    *  actually closes it. Use detailCloseUnsafe() for force-close. */
-  detailClose(): Promise<{ ok: boolean }> {
+  detailClose(): Promise<{ ok: boolean; closed?: boolean }> {
     return ipcRenderer.invoke(Ipc.PluginDetailClose) as Promise<{
       ok: boolean;
+      closed?: boolean;
     }>;
   },
   /** Force-close the detail view without the beforeClose negotiation. */
@@ -242,6 +246,78 @@ const launcherApi = {
     };
   },
   /**
+   * The host asked (via wc.send / sendToFrame) whether the current detail
+   * view may close. The top frame answers through the inline plugin
+   * iframe's beforeClose hooks. Returns unsubscribe. Only meaningful in
+   * the top frame — plugin: frames answer on their own (wired below).
+   */
+  onDetailBeforeCloseRequest(
+    cb: (reqId: number) => Promise<boolean> | boolean,
+  ): () => void {
+    const listener = (_e: unknown, reqId: number) => {
+      void Promise.resolve(cb(reqId))
+        .catch(() => true) // a broken forward must never wedge the close
+        .then((allow) =>
+          ipcRenderer.send(Ipc.DetailCloseResult, reqId, allow),
+        );
+    };
+    ipcRenderer.on(Ipc.EvtDetailBeforeClose, listener);
+    return () => {
+      ipcRenderer.removeListener(Ipc.EvtDetailBeforeClose, listener);
+    };
+  },
+  /**
+   * Ask the inline detail iframe (in this same webContents) whether it
+   * allows closing, via a postMessage round-trip. The plugin frame listens
+   * for `__detailBeforeClose` (see wiring below) and answers through its
+   * beforeClose hooks. Resolves true (allow) when the frame is missing or
+   * does not answer within the timeout — refusing forever would leave the
+   * user stuck in the detail view, and the page's onDetailClose save hooks
+   * have already flushed on the close path.
+   */
+  detailFrameBeforeClose(
+    frameEl: HTMLIFrameElement,
+    timeoutMs = 8000,
+  ): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const reqId = Date.now() + Math.floor(Math.random() * 1000);
+      const settle = (allow: boolean) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener("message", onReply);
+        window.clearTimeout(timer);
+        resolve(allow);
+      };
+      const onReply = (e: MessageEvent) => {
+        const d = e.data as
+          | { kind?: string; reqId?: number; allow?: boolean }
+          | null;
+        if (
+          d &&
+          d.kind === "__detailBeforeCloseResult" &&
+          typeof d.reqId === "number" &&
+          d.reqId === reqId &&
+          e.source === frameEl.contentWindow
+        ) {
+          settle(Boolean(d.allow));
+        }
+      };
+      window.addEventListener("message", onReply);
+      const timer = window.setTimeout(() => settle(true), timeoutMs);
+      const frameWin = frameEl.contentWindow;
+      if (!frameWin) {
+        settle(true); // frame not navigated yet -> don't wedge the close
+        return;
+      }
+      try {
+        frameWin.postMessage({ kind: "__detailBeforeClose", reqId }, "*");
+      } catch {
+        settle(true); // frame gone -> don't wedge the close
+      }
+    });
+  },
+  /**
    * Snapshot the focused field / caret / scroll position in the top frame
    * and push it to the detail iframe, which stores it for the next resume.
    */
@@ -310,14 +386,12 @@ const uToolsApi = {
    *  For the standalone note window, this routes to the NoteWindowClose
    *  IPC (which destroys the separate BrowserWindow) instead of the main
    *  launcher's inline-iframe close path. */
-  closeDetail(): Promise<{ closed: boolean }> {
-    void runBeforeUnload();
+  async closeDetail(): Promise<{ closed: boolean }> {
+    await runBeforeUnload();
     // Notes 插件的 detail 永远运行在独立窗口（App.tsx 不内嵌 notes iframe），
     // 用 pluginId 判断路由——100% 可靠，不依赖 isStandalone latch（其
     // identity 事件推送有不可控的时序问题，曾导致 ✕ 按钮关不掉窗口）。
-    const isNoteWin = pluginIdFromFrame === "notes";
-    const channel = isNoteWin ? Ipc.NoteWindowClose : Ipc.PluginDetailClose;
-    return ipcRenderer.invoke(channel) as Promise<{ closed: boolean }>;
+    return ipcRenderer.invoke(Ipc.NoteWindowClose) as Promise<{ closed: boolean }>;
   },
   // --- Standalone note-window controls (no-op in the inline iframe) ---
   /**
@@ -331,16 +405,12 @@ const uToolsApi = {
   },
   /** Minimize the standalone note window. No-op for non-notes plugins. */
   noteWindowMinimize(): Promise<{ ok: boolean }> {
-    if (pluginIdFromFrame !== "notes")
-      return Promise.resolve({ ok: false });
     return ipcRenderer.invoke(Ipc.NoteWindowMinimize) as Promise<{
       ok: boolean;
     }>;
   },
   /** Toggle maximize/restore for the standalone note window. No-op otherwise. */
   noteWindowToggleMaximize(): Promise<{ ok: boolean }> {
-    if (pluginIdFromFrame !== "notes")
-      return Promise.resolve({ ok: false });
     return ipcRenderer.invoke(Ipc.NoteWindowToggleMaximize) as Promise<{
       ok: boolean;
     }>;
@@ -351,7 +421,6 @@ const uToolsApi = {
    * unsubscribe. In the inline iframe the callback is never fired.
    */
   onNoteWindowState(cb: (maximized: boolean) => void): () => void {
-    if (pluginIdFromFrame !== "notes") return () => {};
     // Reuse a dedicated push channel the main process emits on maximize/restore.
     const listener = (_e: unknown, maximized: boolean) => cb(maximized);
     ipcRenderer.on(Ipc.EvtNoteWindowState, listener);
@@ -405,6 +474,18 @@ const uToolsApi = {
   },
   getClipboardText(): Promise<string> {
     return callCapability("clipboard.read", {}).then((r) => r.text as string);
+  },
+  getClipboardImage(): Promise<{ dataUrl: string; name: string; width: number; height: number }> {
+    return callCapability("ocr.clipboardImage", {});
+  },
+  pickOcrImage(): Promise<{ canceled?: boolean; dataUrl?: string; name?: string; width?: number; height?: number }> {
+    return callCapability("ocr.pickImage", {});
+  },
+  captureOcrScreen(): Promise<{ canceled?: boolean; dataUrl?: string; name?: string; width?: number; height?: number }> {
+    return callCapability("ocr.captureScreen", {});
+  },
+  recognizeOcrImage(dataUrl: string): Promise<{ text: string; confidence: number }> {
+    return callCapability("ocr.recognize", { dataUrl });
   },
   copyText(text: string): Promise<{ ok: true }> {
     return callCapability("clipboard.write", { text });
@@ -577,7 +658,6 @@ let noteWindowStandalone = false;
  * (reliable — no URL query or process.isMainFrame dependency).
  */
 function isStandaloneNoteWindow(): boolean {
-  if (pluginIdFromFrame !== "notes") return false;
   return noteWindowStandalone;
 }
 
@@ -610,9 +690,28 @@ if (location.protocol === "plugin:") {
     }
   });
   // Host asks whether this page may be closed (beforeClose negotiation).
+  // Path A: the main process addressed this frame directly (sendToFrame).
   ipcRenderer.on(Ipc.EvtDetailBeforeClose, async (_e, reqId: number) => {
     const allow = await askBeforeClose();
     ipcRenderer.send(Ipc.DetailCloseResult, reqId, allow);
+  });
+  // Path B: the top frame forwards the host's question through a
+  // postMessage round-trip (used when the host's sendToFrame could not
+  // reach this frame). Both paths may fire for the same request; only
+  // the first answer is honored by the host, so double-answering is safe.
+  window.addEventListener("message", async (e: MessageEvent) => {
+    const d = e.data as { kind?: string; reqId?: number } | null;
+    if (!d || d.kind !== "__detailBeforeClose") return;
+    if (e.source !== window.parent) return;
+    const allow = await askBeforeClose();
+    try {
+      window.parent.postMessage(
+        { kind: "__detailBeforeCloseResult", reqId: d.reqId, allow },
+        "*",
+      );
+    } catch {
+      /* top frame gone; nothing to do */
+    }
   });
   contextBridge.exposeInMainWorld("uTools", uToolsApi);
 } else if (isTopFrame) {

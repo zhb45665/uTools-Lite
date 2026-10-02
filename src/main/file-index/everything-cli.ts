@@ -1,9 +1,63 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+/**
+ * es.exe has no encoding switch (verified against ES 1.1.0.38 `-help`): it
+ * writes its results in the console's ANSI code page. On a zh-CN Windows that
+ * is GBK/CP936, so a path like `F:\演示项目代码` arrives as bytes
+ * `d1 dd ca be cf ee c4 bf b4 fa c2 eb`. Decoding those as UTF-8 produced
+ * mojibake (`ʾ��Ŀ����`) — the classic "Chinese paths are garbled" bug.
+ *
+ * Note the query *input* was never the problem: Node passes argv to
+ * CreateProcessW as UTF-16, so es.exe matched Chinese queries correctly and
+ * only the stdout decoding was wrong.
+ *
+ * gb18030 is a superset of GBK and also covers GB2312, so one decoder handles
+ * every zh-CN case. UTF-8 is used when the OEM code page is already 65001, and
+ * as a fallback anywhere TextDecoder lacks the code page (e.g. non-Windows).
+ */
+function resolveAnsiDecoder(): { decoder: TextDecoder; encoding: string } {
+  if (process.platform !== "win32") {
+    return { decoder: new TextDecoder("utf-8"), encoding: "utf-8" };
+  }
+  // chcp reports the console page (e.g. "65001" or "936"); CP_ACP is what
+  // es.exe actually writes with, but they agree in practice and chcp is the
+  // cheapest reliable probe.
+  const cp = (() => {
+    try {
+      const out = spawnSync("chcp.com", [], {
+        windowsHide: true,
+        encoding: "utf8",
+        timeout: 1200,
+      }).stdout;
+      const m = /(\d{3,5})/.exec(out ?? "");
+      return m ? m[1] : "";
+    } catch {
+      return "";
+    }
+  })();
+  const candidates =
+    cp === "65001" ? ["utf-8"] : ["gb18030", "gbk", "utf-8"];
+  for (const enc of candidates) {
+    try {
+      return { decoder: new TextDecoder(enc), encoding: enc };
+    } catch {
+      /* try next */
+    }
+  }
+  return { decoder: new TextDecoder("utf-8"), encoding: "utf-8" };
+}
+
+let ansiEncoding: { decoder: TextDecoder; encoding: string } | null = null;
+function ansiDecode(buf: Buffer): string {
+  if (!ansiEncoding) ansiEncoding = resolveAnsiDecoder();
+  return ansiEncoding.decoder.decode(buf);
+}
+
 let detected: boolean | null = null;
 let cachedExePath: string | null = null;
+let cachedCliPath: string | null | undefined;
 
 const COMMON_EVERYTHING_PATHS = [
   "D:\\Program Files\\Everything\\Everything.exe",
@@ -47,6 +101,36 @@ export function findEverythingExe(): string | null {
   return null;
 }
 
+/** Locate the Everything command-line query client (`es.exe`).
+ * Everything.exe alone can open its own UI, but cannot stream result paths
+ * back to this app. Treat only es.exe as direct-search capability. */
+export function findEverythingCli(): string | null {
+  if (cachedCliPath !== undefined) return cachedCliPath;
+  const besideGui = COMMON_EVERYTHING_PATHS.map((p) => path.join(path.dirname(p), "es.exe"));
+  for (const p of besideGui) {
+    if (fs.existsSync(p)) return (cachedCliPath = p);
+  }
+  try {
+    // where.exe speaks the console ANSI code page too, so an install under a
+    // Chinese-named folder (e.g. D:\软件\Everything\es.exe) would decode to
+    // mojibake and fail the existsSync check below — silently disabling
+    // Everything search. Decode the raw bytes instead of trusting UTF-8.
+    const where = spawnSync("where.exe", ["es.exe"], {
+      windowsHide: true,
+      timeout: 1200,
+    });
+    const found = ansiDecode(where.stdout ?? Buffer.alloc(0))
+      .split(/\r?\n/)
+      .map((p) => p.trim())
+      .find((p) => p && fs.existsSync(p));
+    if (found) return (cachedCliPath = found);
+  } catch {
+    /* fall through */
+  }
+  cachedCliPath = null;
+  return null;
+}
+
 /**
  * Open local Everything GUI window, optionally focusing a search query.
  */
@@ -75,13 +159,12 @@ export function detectEverything(): Promise<boolean> {
   return new Promise((resolve) => {
     if (detected !== null) return resolve(detected);
 
-    // If local Everything.exe exists, Everything is definitely installed!
-    if (findEverythingExe() !== null) {
-      detected = true;
-      return resolve(true);
+    const cli = findEverythingCli();
+    if (!cli) {
+      detected = false;
+      return resolve(false);
     }
-
-    const proc = spawn("es", ["--version"], { windowsHide: true });
+    const proc = spawn(cli, ["--version"], { windowsHide: true });
     let got = false;
     const done = (ok: boolean) => {
       detected = ok;
@@ -123,16 +206,24 @@ export function searchEverything(
   return detectEverything().then((available) => {
     if (!available) return { available: false, paths: [] };
     return new Promise<EverythingResult>((resolve) => {
-      const proc = spawn("es", [query, "-n", String(limit)], {
+      const cli = findEverythingCli();
+      if (!cli) return resolve({ available: false, paths: [] });
+      const proc = spawn(cli, [query, "-n", String(limit)], {
         windowsHide: true,
       });
-      let buf = "";
-      let lines = 0;
+      // Collect raw bytes and decode once at the end. Decoding per chunk is
+      // unsafe here: a multi-byte GBK character can be split across stdout
+      // chunks, and TextDecoder without {stream:true} would emit a replacement
+      // char for each half. Buffering raw bytes also means a single byte run
+      // can never be mis-split by a line boundary.
+      let chunks: Buffer[] = [];
       let settled = false;
       const finish = () => {
         if (settled) return;
         settled = true;
-        const paths = buf
+        const buf = Buffer.concat(chunks);
+        chunks = [];
+        const paths = ansiDecode(buf)
           .split(/\r?\n/)
           .map((l) => l.trim())
           .filter(Boolean)
@@ -144,8 +235,12 @@ export function searchEverything(
         finish();
       }, 1500);
       proc.stdout.on("data", (d: Buffer) => {
-        buf += d.toString("utf8");
-        lines = buf.split(/\r?\n/).length;
+        if (settled) return;
+        chunks.push(d);
+        // Count newlines in raw bytes: 0x0A can never appear inside a GBK
+        // (or UTF-8) multi-byte sequence, so this is safe without decoding.
+        let lines = 0;
+        for (const c of d) if (c === 0x0a) lines++;
         if (lines > limit + 5) {
           // we have enough; let the process die naturally but stop accumulating
           proc.stdout.pause();

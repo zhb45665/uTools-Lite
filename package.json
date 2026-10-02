@@ -1,6 +1,6 @@
 {
   "name": "utools-lite",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "uTools-style Windows launcher (P1: hotkey window + file/app search + calculator)",
   "main": "dist/main/index.js",
   "author": "uTools Lite",
@@ -18,14 +18,19 @@
     "dist": "npm run build && node scripts/dist.mjs"
   },
   "dependencies": {
+    "@tesseract.js-data/chi_sim": "^1.0.0",
+    "@tesseract.js-data/eng": "^1.0.0",
     "fuzzaldrin-plus": "^0.6.0",
-    "pinyin-pro": "^3.29.4"
+    "pinyin-pro": "^3.29.4",
+    "sql.js": "^1.14.2",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@types/fuzzaldrin-plus": "^0.6.5",
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/sql.js": "^1.4.11",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",

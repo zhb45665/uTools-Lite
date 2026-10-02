@@ -5,6 +5,18 @@ import { suspendBlurHide, resumeBlurHide } from "../launcher-window";
 import { Manifest, pluginDataDir } from "./manifest";
 import { writeAtomic } from "./atomic-file";
 import {
+  pickOcrImage,
+  readClipboardImage,
+  recognizeImage,
+} from "../ocr-service";
+import {
+  deletePluginFile,
+  listPluginFiles,
+  readPluginFile,
+  writePluginFile,
+} from "../database";
+import { captureScreenRegion } from "../ocr-screen-capture";
+import {
   assertInside,
   checkFsAccess,
   isInsideAuthorizedDir,
@@ -43,20 +55,52 @@ export class ApiServer {
   constructor(private ctx: GateContext) {
     this.handlers.set("fs.read", async (m, p) => {
       const target = await this.guardFs(m, p?.path, "访问");
+      if (this.isPrivatePath(m, target)) return { content: readPluginFile(m.id, this.privateRelative(m, target)) };
       return { content: await fs.promises.readFile(target, "utf8") };
     });
     this.handlers.set("fs.write", async (m, p) => {
       const target = await this.guardFs(m, p?.path, "写入");
+      if (this.isPrivatePath(m, target)) {
+        writePluginFile(m.id, this.privateRelative(m, target), String(p?.content ?? ""));
+        return { ok: true };
+      }
       await fs.promises.mkdir(path.dirname(target), { recursive: true });
       await fs.promises.writeFile(target, String(p?.content ?? ""), "utf8");
       return { ok: true };
     });
     this.handlers.set("fs.list", async (m, p) => {
       const target = await this.guardFs(m, p?.path, "列出");
+      if (this.isPrivatePath(m, target)) return { entries: listPluginFiles(m.id, this.privateRelative(m, target) || ".") };
       return { entries: await this.listEntries(target) };
+    });
+    this.handlers.set("fs.delete", async (m, p) => {
+      const target = await this.guardFs(m, p?.path, "删除");
+      if (this.isPrivatePath(m, target)) {
+        deletePluginFile(m.id, this.privateRelative(m, target));
+        return { ok: true };
+      }
+      await fs.promises.unlink(target);
+      return { ok: true };
+    });
+    this.handlers.set("fs.delete", async (m, p) => {
+      const target = await this.guardFs(m, p?.path, "删除");
+      if (this.isPrivatePath(m, target)) {
+        deletePluginFile(m.id, this.privateRelative(m, target));
+        return { ok: true };
+      }
+      // Refuse to delete a directory; notes only ever unlinks note files.
+      if ((await fs.promises.stat(target)).isDirectory()) {
+        throw new Error("refusing to delete a directory");
+      }
+      await fs.promises.unlink(target);
+      return { ok: true };
     });
     this.handlers.set("fs.writeAtomic", async (m, p) => {
       const target = await this.guardFs(m, p?.path, "写入");
+      if (this.isPrivatePath(m, target)) {
+        writePluginFile(m.id, this.privateRelative(m, target), String(p?.content ?? ""), p?.exclusive === true);
+        return { ok: true };
+      }
       await writeAtomic(
         target,
         String(p?.content ?? ""),
@@ -68,7 +112,12 @@ export class ApiServer {
       if (m.id !== "password" || !m.permissions.includes("fs"))
         throw new Error("backup capability unavailable");
       const content = String(p?.encrypted ?? "");
-      const blob = JSON.parse(content);
+      let blob;
+      try {
+        blob = JSON.parse(content);
+      } catch {
+        throw new Error("invalid encrypted backup");
+      }
       if (
         !blob?.kdf ||
         !blob?.iv ||
@@ -123,6 +172,22 @@ export class ApiServer {
     });
     this.handlers.set("clipboard.read", (m) => this.clipboardRead(m));
     this.handlers.set("clipboard.write", (m, p) => this.clipboardWrite(m, p));
+    this.handlers.set("ocr.clipboardImage", (m) => {
+      this.assertOcrPlugin(m);
+      return readClipboardImage();
+    });
+    this.handlers.set("ocr.pickImage", (m) => {
+      this.assertOcrPlugin(m);
+      return pickOcrImage();
+    });
+    this.handlers.set("ocr.captureScreen", (m) => {
+      this.assertOcrPlugin(m);
+      return captureScreenRegion();
+    });
+    this.handlers.set("ocr.recognize", (m, p) => {
+      this.assertOcrPlugin(m);
+      return recognizeImage(String(p?.dataUrl ?? ""));
+    });
     this.handlers.set("net.fetch", (m, p) => this.netFetch(m, p));
     this.handlers.set("shell.openPath", (m, p) => this.shellOpen(m, p));
     this.handlers.set("data.dir", (m) => ({ dir: pluginDataDir(m.id) }));
@@ -186,6 +251,15 @@ export class ApiServer {
     return assertInside(verdict.offerDir, abs);
   }
 
+  private isPrivatePath(m: Manifest, target: string): boolean {
+    const root = pluginDataDir(m.id);
+    return target === root || target.startsWith(root + path.sep);
+  }
+
+  private privateRelative(m: Manifest, target: string): string {
+    return path.relative(pluginDataDir(m.id), target).replace(/\\/g, "/");
+  }
+
   private async listEntries(
     target: string,
   ): Promise<{ name: string; dir: boolean; size: number }[]> {
@@ -214,6 +288,12 @@ export class ApiServer {
       throw new Error(`plugin "${m.id}" has no "clipboard" permission`);
     }
     return { text: clipboard.readText() };
+  }
+
+  private assertOcrPlugin(m: Manifest): void {
+    if (m.id !== "ocr" || !m.permissions.includes("clipboard")) {
+      throw new Error("OCR capability unavailable");
+    }
   }
 
   private async clipboardWrite(m: Manifest, p: any): Promise<{ ok: true }> {

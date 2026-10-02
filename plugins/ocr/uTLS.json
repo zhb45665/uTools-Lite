@@ -1,0 +1,11 @@
+{
+  "id": "ocr",
+  "name": "OCR 文字识别",
+  "description": "离线识别截图和图片中的中文、英文与数字",
+  "version": "1.0.0",
+  "main": "main.js",
+  "detail": "detail.html",
+  "keywords": ["ocr", "文字识别", "图片识别", "截图识别", "识字"],
+  "icon": "◫",
+  "permissions": ["clipboard"]
+}
